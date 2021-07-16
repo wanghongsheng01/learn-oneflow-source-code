@@ -141,7 +141,7 @@ template<typename T>
 ChannelStatus Channel<T>::Receive(T* item) {
   std::unique_lock<std::mutex> lock(mutex_);
   // 若互斥量 lock 被锁定，且 lambda 函数返回值为 true，则 wait 阻塞。必须同时满足，否则不会阻塞。
-  // 只要其它线程调用 notify_one() 函数，且 lambda 为 true 时，wait() 就会解除阻塞。
+  // 只要其它线程调用 notify_one() 函数，且 lambda 为 false 时，wait() 一直处于阻塞状态。
   cond_.wait(lock, [this]() { return (!queue_.empty()) || is_closed_; });  
   if (queue_.empty()) { return kChannelStatusErrorClosed; }
   *item = queue_.front();
