@@ -181,12 +181,14 @@ void Channel<T>::Close() {
  
  
  
- C++ 知识：<br>
+ ## C++ 知识：<br>
  
- std::function<br>
+ 1. std::function<br>
  https://en.cppreference.com/w/cpp/utility/functional/function<br>
  
- std::condition_variable::wait<br>
- void wait( std::unique_lock<std::mutex>& lock );<br>
+ 2. std::condition_variable::wait<br>
+ void wait( std::unique_lock<std::mutex>& lock);<br>
  https://en.cppreference.com/w/cpp/thread/condition_variable/wait<br>
+
+3. std::forward 完美转发
  
