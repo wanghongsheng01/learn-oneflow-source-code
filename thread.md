@@ -23,3 +23,18 @@
 
 ## Actor msg 的消费
 从当前 Thread 的 Local Msg Queue 消息队列中取 msg，如果 Local Msg Queue 队列为空，则从 Msg channel 中取。
+
+Thread 类成员：
+每个 Thread 内部都有一个轮询线程 actor_thread_，负责轮询消息队列 PollMsgChannel
+std::thread actor_thread_ ：轮询消息队列的线程
+
+void PollMsgChannel(const ThreadCtx& thread_ctx); // 轮询消息队列 PollMsgChannel
+
+Thread 类做了啥？
+1. 申请保存本线程的多个 TaskProto 的 HashMap 容器：HashMap<int64_t, TaskProto> id2task_;
+2. 申请本线程的多线程互斥量：std::mutex id2task_mtx_;
+3. 申请本线程的轮询消息队列的线程：std::thread actor_thread_;
+4. 申请本线程接收跨线程 ActorMsg 的队列容器：Channel<ActorMsg> msg_channel_; 
+5. 申请保存本线程处理多个 Actor 的 HashMap 容器：HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_;
+   本线程中的多个 Actor 与 id2task_ 中的多个 TaskProto 一一对应。
+6. 申请消息队列，接收本线程的 ActorMsg：std::queue<ActorMsg> local_msg_queue_;
