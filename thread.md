@@ -31,6 +31,49 @@ std::thread actor_thread_ ：轮询消息队列的线程
 void PollMsgChannel(const ThreadCtx& thread_ctx); // 轮询消息队列 PollMsgChannel
 
 Thread 类做了啥？
+thread.h
+```.cpp
+namespace oneflow {
+
+class Thread {
+ public:
+  OF_DISALLOW_COPY_AND_MOVE(Thread);
+  virtual ~Thread();
+
+  void AddTask(const TaskProto&);
+
+  Channel<ActorMsg>* GetMsgChannelPtr() { return &msg_channel_; } // 获取消息队列
+  void EnqueueActorMsg(const ActorMsg& msg); // 将 ActorMsg 压入消息队列中
+
+  void JoinAllActor() { actor_thread_.join(); } // 启动本线程的轮询线程，阻塞主线程
+
+ protected:
+  Thread() = default;
+  std::thread& mut_actor_thread() { return actor_thread_; } // 返回该 thread 的轮询线程
+  void PollMsgChannel(const ThreadCtx& thread_ctx); // 轮询消息队列 PollMsgChannel
+  void set_thrd_id(int64_t val) { thrd_id_ = val; }
+
+ private:
+  void ConstructActor(int64_t actor_id, const ThreadCtx& thread_ctx); // 创建接收消息的 Actor
+
+  HashMap<int64_t, TaskProto> id2task_; // 保存本线程多个 TaskProto
+  std::mutex id2task_mtx_; // 本线程的互斥量
+
+  // 每个 Thread 内部都有一个轮询线程 actor_thread_，负责轮询消息队列 PollMsgChannel
+  std::thread actor_thread_; // 轮询消息队列的线程
+  Channel<ActorMsg> msg_channel_; // 消息队列，接收跨线程的 ActorMsg
+  HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_; // 保存本线程的多个 Actor，与 id2task_ 中的多个 TaskProto 对应，一个 Actor 接收 一个 TaskProto
+  std::queue<ActorMsg> local_msg_queue_; // 消息队列，接收本线程的 ActorMsg
+
+  int64_t thrd_id_;
+};
+
+}  // namespace oneflow
+
+#endif  // ONEFLOW_CORE_THREAD_THREAD_H_
+
+```
+成员变量：
 1. 申请保存本线程的多个 TaskProto 的 HashMap 容器：HashMap<int64_t, TaskProto> id2task_;
 2. 申请本线程的多线程互斥量：std::mutex id2task_mtx_;
 3. 申请本线程的轮询消息队列的线程：std::thread actor_thread_;
@@ -38,3 +81,6 @@ Thread 类做了啥？
 5. 申请保存本线程处理多个 Actor 的 HashMap 容器：HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_;
    本线程中的多个 Actor 与 id2task_ 中的多个 TaskProto 一一对应。
 6. 申请消息队列，接收本线程的 ActorMsg：std::queue<ActorMsg> local_msg_queue_;
+
+成员方法：
+1. 
