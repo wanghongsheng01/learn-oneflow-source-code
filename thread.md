@@ -30,8 +30,8 @@ std::thread actor_thread_ ：轮询消息队列的线程
 
 void PollMsgChannel(const ThreadCtx& thread_ctx); // 轮询消息队列 PollMsgChannel
 
-Thread 类做了啥？
-thread.h
+Thread 类做了啥？<br>
+thread.h<br>
 ```.cpp
 namespace oneflow {
 
@@ -84,3 +84,17 @@ class Thread {
 
 成员方法：
 1. 
+ 
+ 
+ 
+ 
+ 
+ 
+ C++ 知识：
+ std::function
+ https://en.cppreference.com/w/cpp/utility/functional/function
+ 
+ std::condition_variable::wait  
+ void wait( std::unique_lock<std::mutex>& lock );
+ https://en.cppreference.com/w/cpp/thread/condition_variable/wait
+ 
