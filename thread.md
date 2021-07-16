@@ -89,12 +89,104 @@ class Thread {
  
  
  
+ ## 线程队列<br>
+ channel.h
+ 线程队列主要维护了一个带线程的队列 std::queue<T>，包括了入队、出队、整个队列转移到新队列的方法。
+ ```.cpp
+namespace oneflow {
+
+enum ChannelStatus { kChannelStatusSuccess = 0, kChannelStatusErrorClosed };
+
+template<typename T>
+class Channel final {
+ public:
+  OF_DISALLOW_COPY_AND_MOVE(Channel);
+  Channel() : is_closed_(false) {}
+  ~Channel() = default;
+
+  ChannelStatus Send(const T& item); // item 入队
+  ChannelStatus Receive(T* item); // item 出队
+  ChannelStatus ReceiveMany(std::queue<T>* items); // 整个队列出队，入队新队列 items
+  void Close();
+
+ private:
+  std::queue<T> queue_; // 队列
+  mutable std::mutex mutex_; // 互斥量
+  bool is_closed_;
+  std::condition_variable cond_; // 条件变量，使用 wait，unique_lock 用到
+};
+
+/**
+Channel<T>::Send(const T& item)
+1. 将 Channel::mutex_ 上锁
+2. 将 item 元素压入队列 Channel::queue_
+3. 释放锁，条件变量 Channel::cond_ 唤醒 wait 的线程，释放 mutex_
+*/
+template<typename T>
+ChannelStatus Channel<T>::Send(const T& item) {
+  std::unique_lock<std::mutex> lock(mutex_); // 上锁，阻塞主线程
+  if (is_closed_) { return kChannelStatusErrorClosed; } // 校验队列是否打开，当队列打开时，往队列中压入元素
+  queue_.push(item); // 将 item 压入队列
+  cond_.notify_one(); // 将 wait 的线程唤醒，wait 线程可获取该互斥量锁
+  return kChannelStatusSuccess; 
+}
+
+/**
+Channel<T>::Receive(T* item)
+将 Channel::queue_ 队列中值为 item 的元素弹出队列，并存储在 *item 中
+*/
+template<typename T>
+ChannelStatus Channel<T>::Receive(T* item) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  // 若互斥量 lock 被锁定，且 lambda 函数返回值为 true，则 wait 阻塞。必须同时满足，否则不会阻塞。
+  // 只要其它线程调用 notify_one() 函数，且 lambda 为 true 时，wait() 就会解除阻塞。
+  cond_.wait(lock, [this]() { return (!queue_.empty()) || is_closed_; });  
+  if (queue_.empty()) { return kChannelStatusErrorClosed; }
+  *item = queue_.front();
+  queue_.pop();
+  return kChannelStatusSuccess;
+}
+
+/**
+Channel<T>::ReceiveMany(std::queue<T>* items) ：
+将队列 Channel::queue_ 中的元素全部转移到参数队列 items 中
+
+*/
+template<typename T>
+ChannelStatus Channel<T>::ReceiveMany(std::queue<T>* items) {
+  std::unique_lock<std::mutex> lock(mutex_);
+  cond_.wait(lock, [this]() { return (!queue_.empty()) || is_closed_; });
+  if (queue_.empty()) { return kChannelStatusErrorClosed; }
+  while (!queue_.empty()) {
+    items->push(std::move(queue_.front()));
+    queue_.pop();
+  }
+  return kChannelStatusSuccess;
+}
+
+template<typename T>
+void Channel<T>::Close() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  is_closed_ = true; // Channel::is_closed_ 队列已满的信号
+  cond_.notify_all();
+}
+
+}  // namespace oneflow
+
+#endif  // ONEFLOW_CORE_COMMON_CHANNEL_H_
+
+ ```
  
- C++ 知识：
- std::function
- https://en.cppreference.com/w/cpp/utility/functional/function
  
- std::condition_variable::wait  
- void wait( std::unique_lock<std::mutex>& lock );
- https://en.cppreference.com/w/cpp/thread/condition_variable/wait
+ 
+ 
+ 
+ C++ 知识：<br>
+ 
+ std::function<br>
+ https://en.cppreference.com/w/cpp/utility/functional/function<br>
+ 
+ std::condition_variable::wait<br>
+ void wait( std::unique_lock<std::mutex>& lock );<br>
+ https://en.cppreference.com/w/cpp/thread/condition_variable/wait<br>
  
