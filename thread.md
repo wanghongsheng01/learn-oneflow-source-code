@@ -89,11 +89,11 @@ class Thread {
  
  
  
- ## 线程队列<br>
+ ## Common 里的工具类——线程队列<br>
  channel.h
  线程队列主要维护了一个带线程的队列 std::queue<T>，包括了入队、出队、整个队列转移到新队列的方法。
  ```.cpp
-namespace oneflow {
+ namespace oneflow {
 
 enum ChannelStatus { kChannelStatusSuccess = 0, kChannelStatusErrorClosed };
 
@@ -104,9 +104,9 @@ class Channel final {
   Channel() : is_closed_(false) {}
   ~Channel() = default;
 
-  ChannelStatus Send(const T& item); // item 入队
-  ChannelStatus Receive(T* item); // item 出队
-  ChannelStatus ReceiveMany(std::queue<T>* items); // 整个队列出队，入队新队列 items
+  ChannelStatus Send(const T& item);
+  ChannelStatus Receive(T* item);
+  ChannelStatus ReceiveMany(std::queue<T>* items);
   void Close();
 
  private:
@@ -117,6 +117,7 @@ class Channel final {
 };
 
 /**
+写数据：
 Channel<T>::Send(const T& item)
 1. 将 Channel::mutex_ 上锁
 2. 将 item 元素压入队列 Channel::queue_
@@ -132,6 +133,7 @@ ChannelStatus Channel<T>::Send(const T& item) {
 }
 
 /**
+读数据：
 Channel<T>::Receive(T* item)
 将 Channel::queue_ 队列中值为 item 的元素弹出队列，并存储在 *item 中
 */
@@ -145,9 +147,22 @@ ChannelStatus Channel<T>::Receive(T* item) {
   *item = queue_.front();
   queue_.pop();
   return kChannelStatusSuccess;
+ /**
+  写法二：
+  当队列不为空（或不失效）时，执行读数据；否则处于等待状态
+  while((!queue_.empty()) || is_closed_ == false)
+  { 
+    cond_.wait(lock);
+  }
+  *item = queue_.front();
+  queue_.pop();
+  return kChannelStatusSuccess;
+
+*/
 }
 
 /**
+读数据：
 Channel<T>::ReceiveMany(std::queue<T>* items) ：
 将队列 Channel::queue_ 中的元素全部转移到参数队列 items 中
 
@@ -167,7 +182,7 @@ ChannelStatus Channel<T>::ReceiveMany(std::queue<T>* items) {
 template<typename T>
 void Channel<T>::Close() {
   std::unique_lock<std::mutex> lock(mutex_);
-  is_closed_ = true; // Channel::is_closed_ 队列已满的信号
+  is_closed_ = true; // Channel::is_closed_ 为 true，队列 Channel 失效标志
   cond_.notify_all();
 }
 
