@@ -90,8 +90,8 @@ class Thread {
  
  
  ## Common 里的工具类——线程队列<br>
- channel.h
- 线程队列主要维护了一个带线程的队列 std::queue<T>，包括了入队、出队、整个队列转移到新队列的方法。
+ channel.h<br>
+ 线程队列主要维护了一个带线程的队列 std::queue<T>，包括了入队、出队、整个队列转移到新队列的方法。<br>
  ```.cpp
  namespace oneflow {
 
