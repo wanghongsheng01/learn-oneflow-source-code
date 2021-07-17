@@ -36,9 +36,16 @@ Thread 类做了啥？<br>
 声明了本线程需要处理的消息队列，如 local_msg_queue_、msg_channel_<br>
 声明了本线程的轮询消息队列的线程，如 actor_thread_<br>
 
-
+Thread 行为：主要包括添加任务，以及轮询消息队列，从中取出 msg，并消费掉。<br>
+ 
+* AddTask： 添加 task 任务。将（task_id，task）成对地新增到本线程存储 TaskProto 的 HashMap 容器中<br>
+* PollMsgChannel：轮询消息队列，取出 msg，创建 msg.dst_actor，dst_actor 调用 ProcessMsg 消费掉 msg <br>
+ 
 thread.h<br>
 ```.h
+#ifndef ONEFLOW_CORE_THREAD_THREAD_H_
+#define ONEFLOW_CORE_THREAD_THREAD_H_
+
 #include "oneflow/core/actor/actor_message_bus.h"
 #include "oneflow/core/common/channel.h"
 #include "oneflow/core/common/util.h"
@@ -49,22 +56,31 @@ thread.h<br>
 namespace oneflow {
 
 class Thread {
+/**
+ Thread 行为：主要包括添加任务，以及轮询消息队列，从中取出 msg，并消费掉。
+ 
+ AddTask： 添加 task 任务。将（task_id，task）成对地新增到本线程存储 TaskProto 的 HashMap 容器中
+ PollMsgChannel：轮询消息队列，取出 msg，创建 msg.dst_actor，dst_actor 调用 ProcessMsg 消费掉 msg 
+
+*/
  public:
   OF_DISALLOW_COPY_AND_MOVE(Thread);
   virtual ~Thread();
 
-  void AddTask(const TaskProto&);
+  void AddTask(const TaskProto&); // 将（task_id，task）成对地新增到本线程存储 TaskProto 的 HashMap 容器中
 
   Channel<ActorMsg>* GetMsgChannelPtr() { return &msg_channel_; } // 获取消息队列
-  
+
   //找到输入的 ActorMsg 接收者的 Actor 所在的线程，将 msg 写入对应的消息队列 local_msg_queue_/msg_channel_ 中
-  void EnqueueActorMsg(const ActorMsg& msg); // 将 ActorMsg 压入消息队列中
+  void EnqueueActorMsg(const ActorMsg& msg); // 写数据，将 ActorMsg 压入消息队列中
 
   void JoinAllActor() { actor_thread_.join(); } // 启动本线程的轮询线程，阻塞主线程
 
  protected:
   Thread() = default;
   std::thread& mut_actor_thread() { return actor_thread_; } // 返回该 thread 的轮询线程
+
+  // 轮询消息队列取出 msg，创建 msg.dst_actor，dst_actor 并调用 ProcessMsg 消费掉 msg 
   void PollMsgChannel(const ThreadCtx& thread_ctx); // 轮询消息队列 PollMsgChannel
   void set_thrd_id(int64_t val) { thrd_id_ = val; }
 
