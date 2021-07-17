@@ -31,7 +31,14 @@ std::thread actor_thread_ ：轮询消息队列的线程
 void PollMsgChannel(const ThreadCtx& thread_ctx); // 轮询消息队列 PollMsgChannel
 
 Thread 类做了啥？<br>
+
 thread.h<br>
+声明了存储本线程 TaskProto 和 Actor 的 HashMap 容器，都与线程 id 绑定，如 id2task_、id2actor_ptr_
+声明了本线程需要处理的消息队列，如 local_msg_queue_、msg_channel_
+声明了本线程的轮询消息队列的线程，如 actor_thread_
+
+
+
 ```.cpp
 namespace oneflow {
 
