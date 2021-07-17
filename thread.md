@@ -243,9 +243,6 @@ void Thread::ConstructActor(int64_t actor_id, const ThreadCtx& thread_ctx) {
 5. 申请保存本线程处理多个 Actor 的 HashMap 容器：HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_;
    本线程中的多个 Actor 与 id2task_ 中的多个 TaskProto 一一对应。
 6. 申请消息队列，接收本线程的 ActorMsg：std::queue<ActorMsg> local_msg_queue_;
-
-成员方法：
-1. 
  
  
  
@@ -351,10 +348,6 @@ void Thread::ConstructActor(int64_t actor_id, const ThreadCtx& thread_ctx) {
 
  ```
   
- 
- 
- 
- 
  
  ## Common 里的工具类——线程队列<br>
  channel.h<br>
