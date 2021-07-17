@@ -460,7 +460,7 @@ void Channel<T>::Close() {
 	
 4. 原子操作 std::atomic<T>::fetch_add(另一个加数， std::memory_order_relexed)
 	
-5. HashMap 
+5. HashMap <br>
    `HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_` <br>
    `id2actor_ptr_.erase(actor_it)` <br>
    `id2task_.find(actor_id)`<br>
