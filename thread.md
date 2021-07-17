@@ -32,14 +32,20 @@ void PollMsgChannel(const ThreadCtx& thread_ctx); // 轮询消息队列 PollMsgC
 
 Thread 类做了啥？<br>
 
+声明了存储本线程 TaskProto 和 Actor 的 HashMap 容器，都与线程 id 绑定，如 id2task_、id2actor_ptr_<br>
+声明了本线程需要处理的消息队列，如 local_msg_queue_、msg_channel_<br>
+声明了本线程的轮询消息队列的线程，如 actor_thread_<br>
+
+
 thread.h<br>
-声明了存储本线程 TaskProto 和 Actor 的 HashMap 容器，都与线程 id 绑定，如 id2task_、id2actor_ptr_
-声明了本线程需要处理的消息队列，如 local_msg_queue_、msg_channel_
-声明了本线程的轮询消息队列的线程，如 actor_thread_
+```.h
+#include "oneflow/core/actor/actor_message_bus.h"
+#include "oneflow/core/common/channel.h"
+#include "oneflow/core/common/util.h"
+#include "oneflow/core/job/task.pb.h"
+#include "oneflow/core/thread/thread_context.h"
+#include "oneflow/core/actor/actor.h"
 
-
-
-```.cpp
 namespace oneflow {
 
 class Thread {
@@ -50,6 +56,8 @@ class Thread {
   void AddTask(const TaskProto&);
 
   Channel<ActorMsg>* GetMsgChannelPtr() { return &msg_channel_; } // 获取消息队列
+  
+  //找到输入的 ActorMsg 接收者的 Actor 所在的线程，将 msg 写入对应的消息队列 local_msg_queue_/msg_channel_ 中
   void EnqueueActorMsg(const ActorMsg& msg); // 将 ActorMsg 压入消息队列中
 
   void JoinAllActor() { actor_thread_.join(); } // 启动本线程的轮询线程，阻塞主线程
@@ -63,11 +71,11 @@ class Thread {
  private:
   void ConstructActor(int64_t actor_id, const ThreadCtx& thread_ctx); // 创建接收消息的 Actor
 
-  HashMap<int64_t, TaskProto> id2task_; // 保存本线程多个 TaskProto
+  HashMap<int64_t, TaskProto> id2task_; // 保存本线程多个 （task_id，task）成对的 HashMap 容器
   std::mutex id2task_mtx_; // 本线程的互斥量
 
   // 每个 Thread 内部都有一个轮询线程 actor_thread_，负责轮询消息队列 PollMsgChannel
-  std::thread actor_thread_; // 轮询消息队列的线程
+  std::thread actor_thread_; // 轮询消息队列的线程，接收者 Actor 的线程
   Channel<ActorMsg> msg_channel_; // 消息队列，接收跨线程的 ActorMsg
   HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_; // 保存本线程的多个 Actor，与 id2task_ 中的多个 TaskProto 对应，一个 Actor 接收 一个 TaskProto
   std::queue<ActorMsg> local_msg_queue_; // 消息队列，接收本线程的 ActorMsg
@@ -80,6 +88,137 @@ class Thread {
 #endif  // ONEFLOW_CORE_THREAD_THREAD_H_
 
 ```
+
+thread.cpp
+```.cpp
+#include "oneflow/core/thread/thread.h"
+#include "oneflow/core/job/runtime_context.h"
+#include "oneflow/core/job/global_for.h"
+#include "oneflow/core/actor/actor.h"
+#include "oneflow/core/job/global_for.h"
+
+namespace oneflow {
+
+Thread::~Thread() {
+  actor_thread_.join();
+  CHECK(id2task_.empty());
+  msg_channel_.Close();
+}
+
+/**
+task:
+google::protobuf::Message(base): google::protobuf::Message
+kIndexInFileMessage: 4
+parallel_ctx_: 0x555557602bc0
+machine_id_: 0
+thrd_id_: 524337
+task_id_: 1099614388225
+job_id_: 0
+task_type_:27
+*/
+
+// 将（task_id，task）成对地新增到本线程存储 TaskProto 的 HashMap 容器中
+void Thread::AddTask(const TaskProto& task) {
+  std::unique_lock<std::mutex> lck(id2task_mtx_); // 本线程的互斥锁
+  CHECK(id2task_.emplace(task.task_id(), task).second); // 将（task_id，task）成对地添加到 TaskProto 的 HashMap 容器中
+}
+
+/**
+msg:
+{
+  src_actor_id_: -1
+  dst_actor_id: 2199023255554
+  msg_type_: oneflow::kCmdMsg 
+}
+
+*/
+
+// 找到输入的 ActorMsg 接收者的 Actor 所在的线程，将 msg 写入对应的消息队列 local_msg_queue_/msg_channel_ 中
+void Thread::EnqueueActorMsg(const ActorMsg& msg) {
+  if (Global<ResourceDesc, ForSession>::Get()->thread_enable_local_message_queue()
+      && std::this_thread::get_id() == actor_thread_.get_id()) { // 判断接收者 Actor 是否在本线程内
+    local_msg_queue_.push(msg); // 如果是，则压入本线程的消息队列中
+  } else {
+    msg_channel_.Send(msg); // 如果不是，则写入跨线程的消息队列中
+  }
+}
+/*
+
+msg:{
+  src_actor_id_: 140737349721774
+  dst_actor_id_: 93823560581120
+  msg: oneflow::kRegstMsg
+}
+
+actor_id: 93825026277328
+
+thread_ctx：
+{
+  g_cuda_stream:{
+
+  }
+
+  cb_event_chan: 0x55556943dd50
+  {
+    queue_:
+    mutex_:
+    is_closed_: false
+    cond_:
+
+  }
+}
+*/
+
+// 轮询消息队列并调用 Actor 进行处理
+void Thread::PollMsgChannel(const ThreadCtx& thread_ctx) {
+  while (true) {
+    // 如果本线程的消息队列 local_msg_queue_ 空了，local_msg_queue_ 就从其他线程的消息队列 msg_channel_ 里取（读）数据
+    if (local_msg_queue_.empty()) {
+      CHECK_EQ(msg_channel_.ReceiveMany(&local_msg_queue_), kChannelStatusSuccess);
+    } 
+    ActorMsg msg = std::move(local_msg_queue_.front()); // 从 local_msg_queue_ 里读数据
+    local_msg_queue_.pop();
+    if (msg.msg_type() == ActorMsgType::kCmdMsg) { 
+      if (msg.actor_cmd() == ActorCmd::kStopThread) { // 如果接收到终止线程的 msg.actor_cmd 指令
+        CHECK(id2actor_ptr_.empty()); // 则 check 本线程存储 Actor 的 HashMap 容器是否空了
+        break;
+      } else if (msg.actor_cmd() == ActorCmd::kConstructActor) { // 如果 msg 里的待接收的 Actor 没有被消费
+        ConstructActor(msg.dst_actor_id(), thread_ctx); // 根据 id2task_ 中的 TaskProto 信息（msg::dst_actor_id_）创建 Actor
+        continue;
+      } else {
+        // do nothing
+      }
+    }
+    int64_t actor_id = msg.dst_actor_id();
+    auto actor_it = id2actor_ptr_.find(actor_id);
+    CHECK(actor_it != id2actor_ptr_.end());
+    int process_msg_ret = actor_it->second->ProcessMsg(msg); // actor_it->second 得到 actor 对象
+    if (process_msg_ret == 1) {
+      LOG(INFO) << "thread " << thrd_id_ << " deconstruct actor " << actor_id;
+      id2actor_ptr_.erase(actor_it); // 已用完消费者 actor，从当前 actor 的 HashMap 容器中销毁掉该 actor 对象
+      Global<RuntimeCtx>::Get()->DecreaseCounter("running_actor_cnt"); // 同时，待消费的 Actor 数量减 1
+    } else {
+      CHECK_EQ(process_msg_ret, 0);
+    }
+  }
+}
+
+// 根据 id2task_ 中的 TaskProto 信息（msg::dst_actor_id_）创建 Actor
+void Thread::ConstructActor(int64_t actor_id, const ThreadCtx& thread_ctx) {
+  LOG(INFO) << "thread " << thrd_id_ << " construct actor " << actor_id;
+  std::unique_lock<std::mutex> lck(id2task_mtx_);
+  auto task_it = id2task_.find(actor_id); // id2task_ 存储（task_id，task）对，find 找到 key 为 actor_id 的 key-value 对
+  
+  // 将根据 task_id(task 对象) 新建的 actor 添加到 Actor 的 HashMap 容器中。
+  CHECK(id2actor_ptr_.emplace(actor_id, NewActor(task_it->second, thread_ctx)).second); // task_it->second 得到 task 对象
+  id2task_.erase(task_it); // 消费掉 dst_actor 后，就要从 task 的 HashMap 容器中销毁该 task 对象
+  Global<RuntimeCtx>::Get()->DecreaseCounter("constructing_actor_cnt"); // 同时，待消费的 Actor 数量减 1
+}
+
+}  // namespace oneflow
+
+```
+
 成员变量：
 1. 申请保存本线程的多个 TaskProto 的 HashMap 容器：HashMap<int64_t, TaskProto> id2task_;
 2. 申请本线程的多线程互斥量：std::mutex id2task_mtx_;
