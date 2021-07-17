@@ -310,5 +310,7 @@ void Channel<T>::Close() {
  void wait( std::unique_lock<std::mutex>& lock);<br>
  https://en.cppreference.com/w/cpp/thread/condition_variable/wait<br>
 
-3. std::forward 完美转发
+3. 完美转发 std::forward 
+	
+4. 原子操作 std::atomic<T>::fetch_add(另一个加数， std::memory_order_relexed)
  
