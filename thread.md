@@ -87,6 +87,106 @@ class Thread {
  
  
  
+ ## ThreadPool <br>
+ * 一个队列容器 vec 存储多个队列<br>
+ * 一个线程容器 vec 存储多个线程<br>
+ * 线程与队列一一对应，一个线程负责一个队列<br>
+ * 一个线程完成一个队列<br>
+ * 一个队列存储多个任务<br>
+ 
+ thread_pool.h
+ ```.h
+	namespace oneflow {
+
+	class ThreadPool final {
+	 public:
+		OF_DISALLOW_COPY_AND_MOVE(ThreadPool);
+		ThreadPool() = delete;
+
+		/**
+		遍历 thread_num = 48 个线程，从任务队列的 vec 容器 ThreadPool::work_chans_ 中取出每个线程对应的任务队列 queue_,
+		为执行当前任务队列 chan 中的任务 work 创建线程 std::thread，然后将该线程新增到线程 vec 的容器成员 threads_ 中，
+		新创建的线程内容为从任务队列 chan 中取出任务 work，并执行 work
+		*/
+		ThreadPool(int32_t thread_num); 
+		~ThreadPool();
+
+		int32_t thread_num() const { return threads_.size(); } // 获取线程的总数，也是任务队列总数
+		// 将所有任务 work 均匀地分配到（写入）（48个）任务队列中
+		void AddWork(const std::function<void()>& work); // 添加任务，每个任务都放在函数模版类 std::function 中
+
+	 private:
+	 /**
+	 threads_ 存储多个线程的容器 vec 
+	 work_chans_ 存储多个任务队列的容器 vec，这里的一个任务队列对应 threads_ 中的一个线程
+
+	 */
+
+		// 分别声明了队列的容器 vec、线程容器 vec，一个线程管理一个队列，所以多个待完成任务的队列，与threads_中的工作线程一一对应
+		std::vector<Channel<std::function<void()>>> work_chans_; // 存放任务队列的 vec 容器，与 threads_ 中的工作线程对应
+		std::vector<std::thread> threads_; // 多个工作线程容器 vec
+
+		std::atomic<size_t> work_cnt_; // 任务总数
+	};
+
+	}  // namespace oneflow
+
+	#endif  // ONEFLOW_CORE_THREAD_THREAD_POOL_H_
+
+ ```
+	
+ thread_pool.cpp
+ ```.cpp
+ #include "oneflow/core/thread/thread_pool.h"
+
+	namespace oneflow {
+
+	ThreadPool::ThreadPool(int32_t thread_num)
+			: work_chans_(thread_num), threads_(thread_num), work_cnt_(0) {
+		FOR_RANGE(int32_t, i, 0, thread_num) { // thread_num = 48，有 48 个线程
+		/**
+		work_chans_：任务队列 vec 容器，存放任务队列（queue_）元素
+		当前线程池处理 thread_num = 48 个线程，每个线程对应一个任务队列 queue_
+		*/
+			Channel<std::function<void()>>* chan = &(work_chans_.at(i)); // 从队列容器中取出当前任务队列 queue_，chan：queue_
+			threads_[i] = std::thread([chan]() { // 为执行当前任务队列 chan 中的任务 work 创建线程 std::thread，然后将该线程新增到线程 vec 的容器 threads_ 中
+				std::function<void()> work;
+				while (chan->Receive(&work) == kChannelStatusSuccess) { work(); } // 从任务队列 chan 中取出任务 work，并执行 work
+			});
+		}
+	}
+
+	ThreadPool::~ThreadPool() {
+		FOR_RANGE(int32_t, i, 0, work_chans_.size()) { // 遍历任务队列 vec 容器  work_chans_
+			work_chans_.at(i).Close(); // 一个任务队列使用完毕
+			threads_.at(i).join();     // 线程 vec 容器中对应的新增线程 threads_[i] 启动，主线程阻塞。
+		}
+	}
+
+	/**
+	将所有 work 均匀地分配到（写入） work_chans_.size() 个队列中：当前任务队列的索引 = 任务总数 % 任务队列总数
+
+	一个队列容器 vec 放多个队列
+	一个线程容器 vec 放多个线程
+	线程与队列一一对应
+	一个线程放一个队列
+	一个队列放多个任务
+	*/
+	void ThreadPool::AddWork(const std::function<void()>& work) {
+		const size_t cur_chan_idx = // 当前 work 所分配到的当前任务队列的索引，cur_chan 指当前任务队列，一个任务队列有多个任务 work
+				work_cnt_.fetch_add(1, std::memory_order_relaxed) % work_chans_.size(); // work_chans_.size()：任务队列总数
+		work_chans_.at(cur_chan_idx).Send(work); // 将待完成的任务写入任务队列 vec 容器中，按索引顺序
+		// work_chans_.at(cur_chan_idx) 在队列容器 vec 中，找到当前任务 work 对应的队列
+		// .Send(work) 再将当前任务 work 写入队列
+	}
+
+	}  // namespace oneflow
+
+ ```
+  
+ 
+ 
+ 
  
  
  ## Common 里的工具类——线程队列<br>
