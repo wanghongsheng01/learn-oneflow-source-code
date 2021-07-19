@@ -778,4 +778,6 @@ void Channel<T>::Close() {
    `id2actor_ptr_.erase(actor_it)` <br>
    `id2task_.find(actor_id)`<br>
    `auto actor_it = id2actor_ptr_.find(actor_id);`<br>
+	
+6. std::unordered_set<Key, Hash> 和 std::unordered_map<Key, T, Hash>
  
