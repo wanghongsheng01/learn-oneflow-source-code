@@ -243,6 +243,80 @@ void Thread::ConstructActor(int64_t actor_id, const ThreadCtx& thread_ctx) {
 5. 申请保存本线程处理多个 Actor 的 HashMap 容器：HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_;
    本线程中的多个 Actor 与 id2task_ 中的多个 TaskProto 一一对应。
 6. 申请消息队列，接收本线程的 ActorMsg：std::queue<ActorMsg> local_msg_queue_;
+	
+	
+## CPU Tread
+设置 thrd_id，创建轮询线程，初始化 CUDA 的 ThreadCtx.CudaCBEvent 队列，轮询线程开始轮询队列。<br>
+	
+cpu_thread.h
+```.h
+#include "oneflow/core/thread/thread.h"
+
+namespace oneflow {
+
+/**
+CpuThread：
+设置 thrd_id，创建轮询线程，初始化 CUDA 的 ThreadCtx.CudaCBEvent 队列，轮询线程开始轮询队列。
+*/
+
+class CpuThread final : public Thread {
+ public:
+  OF_DISALLOW_COPY_AND_MOVE(CpuThread);
+  CpuThread() = delete;
+  ~CpuThread() = default;
+
+  CpuThread(int64_t thrd_id);
+
+ private:
+};
+
+}  // namespace oneflow
+
+#endif  // ONEFLOW_CORE_THREAD_CPU_THREAD_H_
+
+```
+
+cpu_thread.cpp
+```.cpp
+#include "oneflow/core/thread/cpu_thread.h"
+#include "oneflow/core/thread/thread_manager.h"
+#include "oneflow/core/profiler/profiler.h"
+#include "oneflow/core/graph/id_serialization.h"
+
+namespace oneflow {
+
+/**
+CpuThread：
+设置 thrd_id，创建轮询线程，初始化 CUDA 的 ThreadCtx.CudaCBEvent 队列，轮询线程开始轮询队列。
+*/
+CpuThread::CpuThread(int64_t thrd_id) {
+  set_thrd_id(thrd_id); // thread_id: 524288
+
+  // 创建轮询线程
+  mut_actor_thread() = std::thread([this, thrd_id]() {
+    OF_PROFILER_NAME_THIS_HOST_THREAD("CPU Actor : (" + std::to_string(thrd_id) + ")");
+    ThreadCtx ctx;
+
+// 初始化 CUDA 的 ThreadCtx.CudaCBEvent 队列
+#ifdef WITH_CUDA // CUDA 代码
+    ctx.cb_event_chan = nullptr; // CudaCBEvent 队列
+#endif  // WITH_CUDA
+
+// 轮询线程开始轮询队列
+    PollMsgChannel(ctx); // Thread::PollMsgChannel，启动轮询：轮询消息队列取出 msg，创建 msg.dst_actor，dst_actor 并调用 ProcessMsg 消费掉 msg 
+  });
+}
+
+REGISTER_DEVICE_THREAD_CREATOR_WITH_STREAM_ID(DeviceType::kCPU,
+                                              ([](const StreamId& stream_id) -> Thread* {
+                                                return new CpuThread(
+                                                    SerializeStreamIdToInt64(stream_id));
+                                              }));
+
+}  // namespace oneflow
+
+```
+	
 
 
 ## Thread Manger<br>
