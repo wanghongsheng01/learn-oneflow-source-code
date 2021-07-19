@@ -207,3 +207,10 @@ def TryInit(self):
 ```
 ==> session_util.py :: Init
 
+
+
+赵露阳打印 Plan 图
+https://github.com/Oneflow-Inc/OneTeam/issues/224
+![image](https://user-images.githubusercontent.com/31394900/126096332-3077be4a-cf3e-4ddb-b1de-6a7411e3ab21.png)
+
+
