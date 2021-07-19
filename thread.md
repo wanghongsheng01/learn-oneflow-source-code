@@ -243,7 +243,135 @@ void Thread::ConstructActor(int64_t actor_id, const ThreadCtx& thread_ctx) {
 5. 申请保存本线程处理多个 Actor 的 HashMap 容器：HashMap<int64_t, std::unique_ptr<Actor>> id2actor_ptr_;
    本线程中的多个 Actor 与 id2task_ 中的多个 TaskProto 一一对应。
 6. 申请消息队列，接收本线程的 ActorMsg：std::queue<ActorMsg> local_msg_queue_;
- 
+
+
+## Thread Manger<br>
+根据 Plan 中的 TaskProto 信息创建 Thread，将 num 个任务平均地分配到 thread_num 个线程上，<br>
+使用单线程/线程池执行 num 个 Callback 任务，析构时，创建 ActorMsg，往所有线程 threads_ 各 <br>
+自对应的消息队列 GetMsgChannelPtr 里写消息 msg 数据。（为什么要在 ThreadMgr 析构时创建 msg?）<br>
+	
+thread_manager.h<br>
+```.h
+#include "oneflow/core/common/channel.h"
+#include "oneflow/core/common/protobuf.h"
+#include "oneflow/core/common/auto_registration_factory.h"
+#include "oneflow/core/thread/thread.h"
+#include "oneflow/core/thread/thread_pool.h"
+
+namespace oneflow {
+
+class Plan;
+
+/**
+ ThreadMgr：
+ 根据 Plan 中的 TaskProto 信息创建 Thread，使用单线程/线程池执行 num 个 Callback 任务，析构时，创建 msg，往所有线程各自对应的消息队列里写消息 msg 数据。
+*/
+class ThreadMgr final {
+ public:
+  OF_DISALLOW_COPY_AND_MOVE(ThreadMgr);
+  ThreadMgr() = delete;
+
+  // 创建 msg，往所有线程各自对应的消息队列里写消息 msg 数据
+  ~ThreadMgr();
+
+  Thread* GetThrd(int64_t thrd_id);
+
+ private:
+  friend class Global<ThreadMgr>;
+
+  // 根据 Plan 中的 TaskProto 信息创建 Thread
+  explicit ThreadMgr(const Plan& plan);
+
+  HashMap<int64_t, std::unique_ptr<Thread>> threads_; // 存储多个 thread 的 HashMap 容器
+};
+
+// 单线程执行 num 个 Callback 任务
+void SingleThreadLoop(size_t num, std::function<void(size_t i)> Callback);
+
+// 使用线程池执行 num 个 Callback 任务
+void MultiThreadLoop(size_t num, std::function<void(size_t i)> Callback);
+
+#define REGISTER_DEVICE_THREAD_CREATOR_WITH_STREAM_ID(device, creator) \
+  REGISTER_CLASS_CREATOR(int, device, Thread, creator, const StreamId&)
+
+}  // namespace oneflow
+
+#endif  // ONEFLOW_CORE_THREAD_THREAD_MANAGER_H_
+```
+
+thread_manager.cpp
+```.cpp
+#include "oneflow/core/thread/thread_manager.h"
+#include "oneflow/core/job/resource_desc.h"
+#include "oneflow/core/job/global_for.h"
+#include "oneflow/core/thread/cpu_thread.h"
+#include "oneflow/core/thread/gpu_thread.h"
+#include "oneflow/core/common/balanced_splitter.h"
+#include "oneflow/core/common/blocking_counter.h"
+#include "oneflow/core/control/global_process_ctx.h"
+#include "oneflow/core/job/global_for.h"
+#include "oneflow/core/common/id_util.h"
+#include "oneflow/core/graph/id_serialization.h"
+
+namespace oneflow {
+// 创建 msg，往所有线程各自对应的消息队列里写消息 msg 数据
+ThreadMgr::~ThreadMgr() {
+  for (auto& thread_pair : threads_) {
+    ActorMsg msg = ActorMsg::BuildCommandMsg(-1, ActorCmd::kStopThread);
+    thread_pair.second->GetMsgChannelPtr()->Send(msg); // 线程内容为：写入消息队列数据
+    thread_pair.second.reset(); // std::unique_ptr<Thread> 将内部对象释放, 并置为空
+    LOG(INFO) << "actor thread " << thread_pair.first << " finish";
+  }
+}
+
+Thread* ThreadMgr::GetThrd(int64_t thrd_id) {
+  // threads_ 是 HashMap，存储 （thrd_id，std::unique_ptr<Thread>）的 key-value 对
+  auto iter = threads_.find(thrd_id); // 找到 key = thrd_id 的 key-value 元素
+  CHECK(iter != threads_.end()) << "thread " << thrd_id << " not found";
+  // 返回 Thread 对象
+  return iter->second.get(); // iter->second 得到 unique_ptr<Thread>，则 .get() 得到指针的解引用值。
+}
+
+// 根据 Plan 中的 TaskProto 信息创建 Thread
+ThreadMgr::ThreadMgr(const Plan& plan) {
+  const int64_t this_rank = GlobalProcessCtx::Rank();
+  for (const TaskProto& task : plan.task()) {
+    TaskId task_id = DeserializeTaskIdFromInt64(task.task_id()); // 反序列化得到 task_id
+    StreamId stream_id = task_id.stream_id(); // 得到 stream_id
+    if (stream_id.device_id().rank() != this_rank) { continue; }
+    int64_t thrd_id = SerializeStreamIdToInt64(stream_id);
+    if (threads_.find(thrd_id) != threads_.end()) { continue; }
+    Thread* thread =  // 创建 Thread 对象
+        NewObj<int, Thread, const StreamId&>(stream_id.device_id().device_type(), stream_id);
+    CHECK_NOTNULL(thread);
+    threads_[thrd_id].reset(thread); // unique_ptr<Thread>::reset(thread) 销毁内部对象并接受新对象 thread 的所有权
+  }
+}
+
+// 单线程执行 num 个 Callback 任务
+void SingleThreadLoop(size_t num, std::function<void(size_t i)> Callback) {
+  FOR_RANGE(size_t, i, 0, num) { Callback(i); }
+}
+
+// 使用线程池执行 num 个 Callback 任务
+void MultiThreadLoop(size_t num, std::function<void(size_t i)> Callback) {
+  size_t thread_num = Global<ThreadPool>::Get()->thread_num(); // ThreadPool::thread_num()
+  thread_num = std::min(num, thread_num);
+  // bs用于设置各个线程执行任务的个数
+  BalancedSplitter bs(num, thread_num); // 将 num 个任务平均地分配到 thread_num 个线程上
+  BlockingCounter bc(thread_num); // 多线程计数器，初始计数总数为 thread_num 个线程
+  FOR_RANGE(size_t, range_id, 0, thread_num) {
+    // 将所有 Callback work 均匀地分配到（写入） work_chans_.size() 个队列中：当前任务队列的索引 = 任务总数 % 任务队列总数
+    Global<ThreadPool>::Get()->AddWork([&bc, &bs, range_id, Callback] { 
+      FOR_RANGE(size_t, i, bs.At(range_id).begin(), bs.At(range_id).end()) { Callback(i); } // 当前线程，执行（bs.At(range_id).begin(), bs.At(range_id)）个任务
+      bc.Decrease(); // 线程计数器 减 1
+    });
+  }
+  bc.WaitUntilCntEqualZero(); // 此线程等待直至其他线程将 cnt_val_ 消费至 0
+}
+
+}  // namespace oneflow
+```
  
  
  ## ThreadPool <br>
