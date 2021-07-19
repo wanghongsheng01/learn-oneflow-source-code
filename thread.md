@@ -424,6 +424,7 @@ REGISTER_DEVICE_THREAD_CREATOR_WITH_STREAM_ID(
 根据 Plan 中的 TaskProto 信息创建 Thread，将 num 个任务平均地分配到 thread_num 个线程上，<br>
 使用单线程/线程池执行 num 个 Callback 任务，析构时，创建 ActorMsg，往所有线程 threads_ 各 <br>
 自对应的消息队列 GetMsgChannelPtr 里写消息 msg 数据。（为什么要在 ThreadMgr 析构时创建 msg?）<br>
+因为析构时，需发送停止信号的 msg，如 ActorCmd::kStopThread <br>
 	
 thread_manager.h<br>
 ```.h
