@@ -1,4 +1,6 @@
 # Thread 
+位置：包括 /oneflow/oneflow/core/thread/ 文件夹，包括 /oneflow/oneflow/core/common/channel.h 和 /oneflow/oneflow/core/common/blocking_counter.h 
+
 ## 生产者 Actor 与 消费者 Actor 之间消息传递，msg 的流动轨迹
 ![image](https://user-images.githubusercontent.com/31394900/125795762-ae38987f-8574-4687-987c-dacb22ea08be.png)
 
