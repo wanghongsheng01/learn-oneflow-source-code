@@ -316,6 +316,103 @@ REGISTER_DEVICE_THREAD_CREATOR_WITH_STREAM_ID(DeviceType::kCPU,
 }  // namespace oneflow
 
 ```
+
+	
+## GPU Thread
+创建轮询线程，初始化 CUDACBEvent 轮询消息队列的配置，启动轮询线程，轮询消息队列。<br>
+从队列里读消息，执行任务，销毁已执行任务。<br>
+
+gpu_thread.h
+```.h
+#ifndef ONEFLOW_CORE_THREAD_GPU_THREAD_H_
+#define ONEFLOW_CORE_THREAD_GPU_THREAD_H_
+
+#include "oneflow/core/thread/thread.h"
+
+namespace oneflow {
+
+#ifdef WITH_CUDA
+
+class GpuThread final : public Thread {
+ public:
+  OF_DISALLOW_COPY_AND_MOVE(GpuThread);
+  GpuThread() = delete;
+  ~GpuThread();
+
+  GpuThread(int64_t thrd_id, int64_t dev_id);
+
+ private:
+  Channel<CudaCBEvent> cb_event_chan_; // CUDA 任务 CudaCBEvent 的轮询消息队列 cb_event_chan_
+  std::thread cb_event_poller_; // 轮询线程 cb_event_poller_
+};
+
+#endif
+
+}  // namespace oneflow
+
+#endif  // ONEFLOW_CORE_THREAD_GPU_THREAD_H_
+```
+
+gpu_thread.cpp
+```.cpp
+#include "oneflow/core/thread/gpu_thread.h"
+#include "oneflow/core/thread/thread_manager.h"
+#include "oneflow/core/device/cuda_stream_handle.h"
+#include "oneflow/core/profiler/profiler.h"
+#include "oneflow/core/graph/id_serialization.h"
+
+namespace oneflow {
+/**
+GpuThread：
+创建轮询线程，初始化 CUDACBEvent 轮询消息队列的配置，启动轮询线程，轮询消息队列。
+从队列里读消息，执行任务，销毁已执行任务。
+*/
+
+// CUDA 代码
+#ifdef WITH_CUDA
+
+GpuThread::GpuThread(int64_t thrd_id, int64_t dev_id) {
+  set_thrd_id(thrd_id);
+  mut_actor_thread() = std::thread([this, dev_id, thrd_id]() { // 创建轮询线程
+    OF_PROFILER_NAME_THIS_HOST_THREAD("GPU " + std::to_string(dev_id) + " Actor : ("
+                                      + std::to_string(thrd_id) + ")");
+    OF_CUDA_CHECK(cudaSetDevice(dev_id));
+    ThreadCtx ctx;
+    ctx.g_cuda_stream.reset(new CudaStreamHandle(&cb_event_chan_)); // unique_ptr<CudaStreamHandle>::reset 销毁内部对象并接受 CudaStreamHandle 新对象的所有权
+    ctx.cb_event_chan = &cb_event_chan_; // 初始化 CUDACBEvent 轮询消息队列的配置
+    PollMsgChannel(ctx); // 启动轮询线程，轮询消息队列
+  });
+
+  // 创建轮询线程 cb_event_poller_
+  cb_event_poller_ = std::thread([this, dev_id, thrd_id]() {
+    OF_PROFILER_NAME_THIS_HOST_THREAD("GPU " + std::to_string(dev_id) + " Poller : ("
+                                      + std::to_string(thrd_id) + ")");
+    OF_CUDA_CHECK(cudaSetDevice(dev_id));
+    CudaCBEvent cb_event;
+    while (cb_event_chan_.Receive(&cb_event) == kChannelStatusSuccess) { // 从队列里读消息
+      OF_CUDA_CHECK(cudaEventSynchronize(cb_event.event));
+      cb_event.callback(); // 执行任务
+      OF_CUDA_CHECK(cudaEventDestroy(cb_event.event)); // 销毁已执行任务
+    }
+  });
+}
+
+GpuThread::~GpuThread() {
+  cb_event_chan_.Close(); // CudaCBEvent 的轮询消息队列已使用完毕，可回收
+  cb_event_poller_.join(); // 轮询线程启动，主线程阻塞
+}
+
+REGISTER_DEVICE_THREAD_CREATOR_WITH_STREAM_ID(
+    DeviceType::kGPU, ([](const StreamId& stream_id) -> Thread* {
+      int64_t thrd_id = SerializeStreamIdToInt64(stream_id);
+      int64_t dev_id = static_cast<int64_t>(stream_id.device_id().device_index());
+      return new GpuThread(thrd_id, dev_id);
+    }));
+
+#endif
+
+}  // namespace oneflow
+```
 	
 
 
