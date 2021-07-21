@@ -351,9 +351,60 @@ void MakePullJob(const std::string& job_name, const std::string& op_name,
 
 # CompileCurJobOnMaster
 
-# compiler.cpp -> Compiler::Compile
+## job_completer.cpp -> JobCompleter::Complete(Job* job)
+第一步，经过 JobCompleter 将 Job 不断重写。经过多个 Pass 以生成最终的 Job。<br>
+中间借助 OpGraph 抽象不断优化和推导新的 Job 对应的逻辑图。这些 Pass 包括一些优化，如增加控制边；计算临界区；以及使用 XRT 框架重新构建 Job。<br>
 
-# job_completer.cpp -> JobCompleter::Complete(Job* job)
+job_completer.cpp -> JobCompleter::Complete(Job* job)<br>
+```.cpp
+/**
+JobCompleter().Complete(job)：
+第一步，经过 JobCompleter 将 Job 不断重写。经过多个 Pass 以生成最终的 Job。
+中间借助 OpGraph 抽象不断推导新的 Job 对应的逻辑图。这些 Pass 包括一些优化，如增加控制边；计算临界区；以及使用 XRT 框架重新构建 Job。
+*/
+void JobCompleter::Complete(Job* job) const {
+  JobPassCtx job_pass_ctx(GlobalJobDesc());
+  // JobPass4Name("DumpBlobParallelConfPass") 根据 PassName 获取 JobPass，构造 JobPass 对象
+  JobPass4Name("DumpBlobParallelConfPass")(job, &job_pass_ctx); 
+  // NOTE(chengcheng): disable this pass for reduce boxing memory life cycle to memory cost.
+  if (!Global<ResourceDesc, ForSession>::Get()->resource().disable_group_boxing_by_dst_parallel()) {
+
+    // 借助 OpGraph 抽象，不断优化和推导新的 Job 对应的逻辑图
+    // GroupBoxingByDstParallel 是 OpGraph 图优化的过程，下节讲。
+    WithOpGraphAndMutJobBuilder(job, &GroupBoxingByDstParallel); // 中间借助 OpGraph 抽象不断推导新的 Job 对应的逻辑图
+  }
+  WithOpGraphAndMutJobBuilder(job, &SetCtrlInOpName4VariableOp);
+  // complete tick ops
+  WithOpGraphAndMutJobBuilder(job, &AutoPrependTick);
+  WithOpGraphAndMutJobBuilder(job, &AddTickForTimeShape);
+  WithOpGraphAndMutJobBuilder(job, &AutoSourceAndSinkTick);
+  WithOpGraphAndMutJobBuilder(job, &AddGlobalInputCriticalSections);
+  WithOpGraphAndMutJobBuilder(job, &AddGlobalOutputCriticalSections);
+  JobPass4Name("DumpBlobParallelConfPass")(job, &job_pass_ctx);
+  if (XrtCompilationEnabled(GlobalJobDesc())) {
+
+// 使用 XRT 框架重新构建 Job，XRT 框架会将 Job 中的 OpGraph 进行有选择的合并，并选取使用 XLA 来进行编译生成优化后的 Kernel。
+#ifdef OF_WITH_XRT
+    WithOpGraphAndMutJob(job, &RebuildXrtCompiledJob); 
+#else
+    LOG(WARNING) << "It will not use XLA or TensorRT since WITH_XLA or "
+                    "WITH_TENSORRT was not enabled when compiling the project.";
+#endif  // OF_WITH_XRT
+  }
+
+#ifdef WITH_CUDA
+  if (Global<ResourceDesc, ForSession>::Get()->nccl_use_compute_stream()) {
+    // NOTE(chengcheng): this pass need as last pass for insert correct op with nccl boxing.
+    JobPass4Name("InsertNcclLogicalOpPass")(job, &job_pass_ctx);
+    // NOTE(chengcheng): Becasue insert new logical nccl op, MUST dump time shape, sbp again.
+    JobPass4Name("DumpBlobParallelConfPass")(job, &job_pass_ctx); // 插入 logical nccl op 后，重新转储（dump）time shape, sbp。
+  }
+#endif  // WITH_CUDA
+  CheckOpGraph(OpGraph(*job));
+}
+
+}  // namespace oneflow
+```
 
 
 # CompileJobsAndMergePlans
