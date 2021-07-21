@@ -37,11 +37,9 @@ void FilterOpName2ParallelBlobConf(
 }
 ```
 
-
 # 几个 Job
-使用脚本 /oneflow/core/job/oneflow.cpp
 
-数据流转
+代码功能——编译期数据流转
 
 从数据层面看一下User Job的运行过程：首先，User Job可能有多个输入、多个输出，oneflow会遍历所有User Job中的Input Op和Return Op，针对每个Input Op，分别构建一个对应的Push Job；针对每个Return Op，分别构建一个对应的Pull Job。
 
@@ -50,11 +48,11 @@ https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
 系统自动添加的Push Job用于接收输入数据，其ForeignInput Op 内部维护一个buffer，该buffer等待Python端喂数据；Push Job处理完输入数据X1后，由于X1在Push Job和User Job间是内存共享的，可以直接被User Job所消费，从而继续被Op_a、Op_b处理，最后得到输出数据Y1；同样，系统添加的Pull Job专门用于处理输出数据，Pull Job中有一个ForeignOutput Op，其内部同样维护一个buffer，当往该buffer内填完数据以后，python端对应的of blob对象中的numpy就拷贝了对应的数据。从而完整整个从输入到输出的数据流转过程。
 
 
-## MakeModelIoV2Jobs<br>
-* 每个 Variable 单独一个 Op 去处理<br>
+## MakeModelIoJobs && MakeModelIoV2Jobs<br>
 
 * MakeModelInitJob 干了啥？<br>
-  JobBuilder 类对象通过 `job_builder.AddOps(Device 信息，即 parallel_conf , {xxx_op_conf 的 vector})` 将 op 信息添加到 JobBuilder::job_ 、 JobBuilder::op_name2op_conf_ 、  PlacementGroup 里。MakeModelLoadJob/MakeModelSaveJob 的流程与 MakeModelInitJob 一摸一样。<br>
+  JobBuilder 类对象通过 `job_builder.AddOps(Device 信息，即 parallel_conf , {xxx_op_conf 的 vector})` 将 op 信息添加到<br>
+  JobBuilder::job_ 、 JobBuilder::op_name2op_conf_ 、  PlacementGroup 里。<br>
 
   1. JobBuilder 对象添加 foreign_input_op、tick_op 的信息<br>
      `job_builder.AddOps(master_parallel_conf, {foreign_input_op_conf, tick_op_conf}); // 参数包括 Device、foreign_input、tick 信息`<br>
@@ -65,71 +63,71 @@ https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
   3. job_builder 添加 model_init_op 的信息<br>
      `job_builder.AddOps(pair.first, {model_init_op_conf}); // job_builder 添加 model_init_op 的信息（parallel_conf，model_init_op_conf）`<br>
 
-model_io_v2_job.cpp<br> 
-```.cpp
-// MakeModelInitJob("System-ModelInit", &model_init_job, var_op_name2op_conf, var_op_name2parallel_blob_conf);
-void MakeModelInitJob(
-    const std::string& job_name, Job* job,
-    const HashMap<std::string, OperatorConf>& var_op_name2op_conf,
-    const HashMap<std::string, ParallelBlobConf>& var_op_name2parallel_blob_conf) {
-  auto* flag_name2flag_value = job->mutable_job_conf()->mutable_flag_name2flag_value();
-  (*flag_name2flag_value)["__is_user_function__"].set_at_bool(false);
+  model_io_v2_job.cpp<br> 
+  ```.cpp
+  // MakeModelInitJob("System-ModelInit", &model_init_job, var_op_name2op_conf, var_op_name2parallel_blob_conf);
+  void MakeModelInitJob(
+      const std::string& job_name, Job* job,
+      const HashMap<std::string, OperatorConf>& var_op_name2op_conf,
+      const HashMap<std::string, ParallelBlobConf>& var_op_name2parallel_blob_conf) {
+    auto* flag_name2flag_value = job->mutable_job_conf()->mutable_flag_name2flag_value();
+    (*flag_name2flag_value)["__is_user_function__"].set_at_bool(false);
 
-  // 设置当前 job 的 job_conf 的 job_name_ 和 job_type_.predict_conf_
-  SetModelIoDefaultJobConf(job->mutable_job_conf(), job_name);
-  Global<InterUserJobInfo>::Get()->set_global_model_init_job_name(job_name);
+    // 设置当前 job 的 job_conf 的 job_name_ 和 job_type_.predict_conf_
+    SetModelIoDefaultJobConf(job->mutable_job_conf(), job_name);
+    Global<InterUserJobInfo>::Get()->set_global_model_init_job_name(job_name);
 
-  // 构造当前 job 的 job_builder 对象
-  JobBuilder job_builder(job);
+    // 构造当前 job 的 job_builder 对象
+    JobBuilder job_builder(job);
 
-  // 设置 device，ParallelConf::set_device_tag("cpu"), ParallelConf::add_device_name("0:0")
-  const ParallelConf master_parallel_conf = GenParallelConfOfCpuZeroOnMaster();
-  const OperatorConf tick_op_conf = GenTickOpConf("System-ModelInit-Tick"); // tick 信号
-  /**
-  job 编译到 plan 中，最后会创建一个运行时的 new Runtime()，不过，Runtime 并没有立即执行，而是会等待一个tick信号触发。
-  通常，系统自动添加的 Push Job 中的 ForeignInput Op 内部维护一个buffer，该 buffer 等待 Python 端喂数据，一旦有数据输入此 op，
-  将触发 tick 信号，开启整个 Plan 的运行过程。
-  */
-  const OperatorConf foreign_input_op_conf = GenForeignInputOpConf(job_name, 1);
+    // 设置 device，ParallelConf::set_device_tag("cpu"), ParallelConf::add_device_name("0:0")
+    const ParallelConf master_parallel_conf = GenParallelConfOfCpuZeroOnMaster();
+    const OperatorConf tick_op_conf = GenTickOpConf("System-ModelInit-Tick"); // tick 信号
+    /**
+    job 编译到 plan 中，最后会创建一个运行时的 new Runtime()，不过，Runtime 并没有立即执行，而是会等待一个tick信号触发。
+    通常，系统自动添加的 Push Job 中的 ForeignInput Op 内部维护一个buffer，该 buffer 等待 Python 端喂数据，一旦有数据输入此 op，
+    将触发 tick 信号，开启整个 Plan 的运行过程。
+    */
+    const OperatorConf foreign_input_op_conf = GenForeignInputOpConf(job_name, 1);
 
-  // 将待添加的 op 的 op_conf 添加到 job_ 里，同时将新添加的（op_conf.name(), mut_op_conf）写入 op_name2op_conf_ 中，
-  // 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
-  job_builder.AddOps(master_parallel_conf, {foreign_input_op_conf, tick_op_conf}); // 参数包括 Device、foreign_input、tick 信息
+    // 将待添加的 op 的 op_conf 添加到 job_ 里，同时将新添加的（op_conf.name(), mut_op_conf）写入 op_name2op_conf_ 中，
+    // 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
+    job_builder.AddOps(master_parallel_conf, {foreign_input_op_conf, tick_op_conf}); // 参数包括 Device、foreign_input、tick 信息
 
-  if (var_op_name2op_conf.empty()) { return; }
-  HashMap<ParallelConf, std::vector<OperatorConf>> parallel_conf2variable_op_conf; // Device 上的 Op
-  for (const auto& pair : var_op_name2op_conf) { // var_op_name2op_conf
-    const auto& var_op_name = pair.first;
-    const OperatorConf& variable_op_conf = pair.second; // variable_op_conf
-    const ParallelBlobConf& parallel_blob_conf = var_op_name2parallel_blob_conf.at(var_op_name);
-    parallel_conf2variable_op_conf[parallel_blob_conf.parallel_conf()].push_back(variable_op_conf);
-    OperatorConf new_var_op_conf = CloneVariableOpConf(variable_op_conf);
-    job_builder.AddOps(parallel_blob_conf.parallel_conf(), {new_var_op_conf});  // job_builder 添加 var_op 的信息（parallel_conf，var_op_conf）
-  }
-
-  // 构造 model_init_op_conf，并用 variable_op_confs 初始化
-  for (auto& pair : parallel_conf2variable_op_conf) { // parallel_conf2variable_op_conf
-    std::vector<OperatorConf>& variable_op_confs = pair.second;
-    OperatorConf model_init_op_conf{}; // 构造 model_init_op_conf，并用 variable_op_confs 初始化
-    model_init_op_conf.set_name("System-ModelInit-" + NewUniqueId());
-    // 获取 model_init_op_conf，并为其预留内存空间
-    ModelInitV2OpConf* model_init_conf = model_init_op_conf.mutable_model_init_v2_conf();
-    const int64_t num_var = variable_op_confs.size();
-    model_init_conf->mutable_ref()->Reserve(num_var);
-    model_init_conf->mutable_variable_op_name()->Reserve(num_var); 
-    model_init_conf->mutable_original_variable_conf()->Reserve(num_var);
-
-    // 用 variable_op_confs 的信息初始化 model_init_conf 的内容
-    for (int64_t i = 0; i < num_var; ++i) {
-      model_init_conf->add_ref(GetVariableLbn(variable_op_confs.at(i))); // GenLogicalBlobName
-      model_init_conf->add_variable_op_name(variable_op_confs.at(i).name());
-      *model_init_conf->add_original_variable_conf() =
-          std::move(*variable_op_confs.at(i).mutable_variable_conf());
+    if (var_op_name2op_conf.empty()) { return; }
+    HashMap<ParallelConf, std::vector<OperatorConf>> parallel_conf2variable_op_conf; // Device 上的 Op
+    for (const auto& pair : var_op_name2op_conf) { // var_op_name2op_conf
+      const auto& var_op_name = pair.first;
+      const OperatorConf& variable_op_conf = pair.second; // variable_op_conf
+      const ParallelBlobConf& parallel_blob_conf = var_op_name2parallel_blob_conf.at(var_op_name);
+      parallel_conf2variable_op_conf[parallel_blob_conf.parallel_conf()].push_back(variable_op_conf);
+      OperatorConf new_var_op_conf = CloneVariableOpConf(variable_op_conf);
+      job_builder.AddOps(parallel_blob_conf.parallel_conf(), {new_var_op_conf});  // job_builder 添加 var_op 的信息（parallel_conf，var_op_conf）
     }
-    job_builder.AddOps(pair.first, {model_init_op_conf}); // job_builder 添加 model_init_op 的信息（parallel_conf，model_init_op_conf）
+
+    // 构造 model_init_op_conf，并用 variable_op_confs 初始化
+    for (auto& pair : parallel_conf2variable_op_conf) { // parallel_conf2variable_op_conf
+      std::vector<OperatorConf>& variable_op_confs = pair.second;
+      OperatorConf model_init_op_conf{}; // 构造 model_init_op_conf，并用 variable_op_confs 初始化
+      model_init_op_conf.set_name("System-ModelInit-" + NewUniqueId());
+      // 获取 model_init_op_conf，并为其预留内存空间
+      ModelInitV2OpConf* model_init_conf = model_init_op_conf.mutable_model_init_v2_conf();
+      const int64_t num_var = variable_op_confs.size();
+      model_init_conf->mutable_ref()->Reserve(num_var);
+      model_init_conf->mutable_variable_op_name()->Reserve(num_var); 
+      model_init_conf->mutable_original_variable_conf()->Reserve(num_var);
+
+      // 用 variable_op_confs 的信息初始化 model_init_conf 的内容
+      for (int64_t i = 0; i < num_var; ++i) {
+        model_init_conf->add_ref(GetVariableLbn(variable_op_confs.at(i))); // GenLogicalBlobName
+        model_init_conf->add_variable_op_name(variable_op_confs.at(i).name());
+        *model_init_conf->add_original_variable_conf() =
+            std::move(*variable_op_confs.at(i).mutable_variable_conf());
+      }
+      job_builder.AddOps(pair.first, {model_init_op_conf}); // job_builder 添加 model_init_op 的信息（parallel_conf，model_init_op_conf）
+    }
   }
-}
-```
+  ```
 
 * job_builder.AddOps(parallel_conf 信息, {xxx_op_conf 的 vector}) 干了啥？<br>
   将新添加 op 的 op_conf、op_conf、parallel_conf 信息更新（赋值）到 JobBuilder 类对象的成员变量中。<br>
@@ -138,68 +136,68 @@ void MakeModelInitJob(
   2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()<br>
   3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里<br>
 
-job_builder.cpp -> JobBuilder::AddOps<br>
-```.cpp
-// 将待添加的 op 的 op_conf 添加到 job_ 里，同时将新添加的（op_conf.name(), mut_op_conf）写入 op_name2op_conf_ 中，
-// 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
-void JobBuilder::AddOps(const ParallelConf& parallel_conf,
-                        const std::vector<OperatorConf>& op_confs) {
-// 做 3 件事情：
-// 1. JobBuilder::job_: 用新添加 Op 的 op_conf 初始化 JobBuilder::job_ 的 OperatorConf
-// 2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()
-// 3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
-
-  if (op_confs.empty()) { return; }
-  std::vector<std::string> op_names;
-  op_names.reserve(op_confs.size());
-
-  
-  for (const auto& op_conf : op_confs) {
-    CHECK(op_name2op_conf_.find(op_conf.name()) == op_name2op_conf_.end());
-
-    // 将待添加 op 的 op_conf 赋值给 job_ 的 op_conf
-    OperatorConf* mut_op_conf = job_->mutable_net()->add_op();
-    *mut_op_conf = op_conf;
-
-    // 将新添加的（op_conf.name(), op_conf）写入 op_name2op_conf_ 中
-    CHECK(op_name2op_conf_.emplace(op_conf.name(), mut_op_conf).second);
-    op_names.emplace_back(op_conf.name());
-  }
-
+  job_builder.cpp -> JobBuilder::AddOps<br>
+  ```.cpp
+  // 将待添加的 op 的 op_conf 添加到 job_ 里，同时将新添加的（op_conf.name(), mut_op_conf）写入 op_name2op_conf_ 中，
   // 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
-  AddOpNamesToPlacementGroup(op_names, parallel_conf); 
-}
-```
+  void JobBuilder::AddOps(const ParallelConf& parallel_conf,
+                          const std::vector<OperatorConf>& op_confs) {
+  // 做 3 件事情：
+  // 1. JobBuilder::job_: 用新添加 Op 的 op_conf 初始化 JobBuilder::job_ 的 OperatorConf
+  // 2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()
+  // 3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
 
-model_io_v2_job.cpp -> MakeModelIoV2Jobs<br>
-```.cpp
-// MakeModelIoV2Jobs(jobs, var_op_name2parallel_blob_conf, AppendJob);
-void MakeModelIoV2Jobs(const std::vector<std::shared_ptr<Job>>& jobs,
-                       const HashMap<std::string, ParallelBlobConf>& var_op_name2parallel_blob_conf,
-                       const std::function<void(Job*)>& Handler) {
-  HashMap<std::string, OperatorConf> var_op_name2op_conf;
-  FilterVariableOps(jobs, &var_op_name2op_conf);
-  {
-    Job model_init_job;
-    MakeModelInitJob("System-ModelInit", &model_init_job, var_op_name2op_conf,
-                     var_op_name2parallel_blob_conf);
-    Handler(&model_init_job); // 创建 job 对象，将当前 job 添加至 jobs 容器中  
-  }
-  {
-    Job model_load_job;
-    MakeModelLoadJob("System-ModelLoad", &model_load_job, var_op_name2op_conf,
-                     var_op_name2parallel_blob_conf);
-    Handler(&model_load_job);
-  }
-  {
-    Job model_save_job;
-    MakeModelSaveJob("System-ModelSave", &model_save_job, var_op_name2op_conf,
-                     var_op_name2parallel_blob_conf);
-    Handler(&model_save_job);
-  }
-}
+    if (op_confs.empty()) { return; }
+    std::vector<std::string> op_names;
+    op_names.reserve(op_confs.size());
 
-```
+
+    for (const auto& op_conf : op_confs) {
+      CHECK(op_name2op_conf_.find(op_conf.name()) == op_name2op_conf_.end());
+
+      // 将待添加 op 的 op_conf 赋值给 job_ 的 op_conf
+      OperatorConf* mut_op_conf = job_->mutable_net()->add_op();
+      *mut_op_conf = op_conf;
+
+      // 将新添加的（op_conf.name(), op_conf）写入 op_name2op_conf_ 中
+      CHECK(op_name2op_conf_.emplace(op_conf.name(), mut_op_conf).second);
+      op_names.emplace_back(op_conf.name());
+    }
+
+    // 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
+    AddOpNamesToPlacementGroup(op_names, parallel_conf); 
+  }
+  ```
+
+  model_io_v2_job.cpp -> MakeModelIoV2Jobs<br>
+  ```.cpp
+  // MakeModelIoV2Jobs(jobs, var_op_name2parallel_blob_conf, AppendJob);
+  void MakeModelIoV2Jobs(const std::vector<std::shared_ptr<Job>>& jobs,
+                         const HashMap<std::string, ParallelBlobConf>& var_op_name2parallel_blob_conf,
+                         const std::function<void(Job*)>& Handler) {
+    HashMap<std::string, OperatorConf> var_op_name2op_conf;
+    FilterVariableOps(jobs, &var_op_name2op_conf);
+    {
+      Job model_init_job;
+      MakeModelInitJob("System-ModelInit", &model_init_job, var_op_name2op_conf,
+                       var_op_name2parallel_blob_conf);
+      Handler(&model_init_job); // 创建 job 对象，将当前 job 添加至 jobs 容器中  
+    }
+    {
+      Job model_load_job;
+      MakeModelLoadJob("System-ModelLoad", &model_load_job, var_op_name2op_conf,
+                       var_op_name2parallel_blob_conf);
+      Handler(&model_load_job);
+    }
+    {
+      Job model_save_job;
+      MakeModelSaveJob("System-ModelSave", &model_save_job, var_op_name2op_conf,
+                       var_op_name2parallel_blob_conf);
+      Handler(&model_save_job);
+    }
+  }
+
+  ```
 
 * FilterVariableOps 干啥的？<br>
   1. 因为 Model Init/Load/Save 都是只针对 variable_op，所以需要将 variable_op 从当前 jobs 的 op 中过滤出来。<br>
@@ -226,7 +224,6 @@ void MakeModelIoV2Jobs(const std::vector<std::shared_ptr<Job>>& jobs,
   }
   ```
 
-## MakeModelIoJobs
 
 ## MakePushJob
 
