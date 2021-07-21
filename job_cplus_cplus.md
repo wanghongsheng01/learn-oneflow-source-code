@@ -253,6 +253,8 @@ MakePushJob：
 2. job_builder 添加 output_op 的信息；
 3. 最后配置 job 的 name、predict、data_typ 信息。
 */
+
+// 外部调用：MakePushJob(std::string("System-Push-") + push_op_name, push_op_name, parallel_blob_conf, push_job)
 void MakePushJob(const std::string& job_name, const std::string& op_name,
                  const ParallelBlobConf& parallel_blob_conf, Job* job) {
   auto* flag_name2flag_value = job->mutable_job_conf()->mutable_flag_name2flag_value();
@@ -295,7 +297,7 @@ void MakePushJob(const std::string& job_name, const std::string& op_name,
   } // job_builder 添加 output_op 的信息
 
 
-  // 配置 job 的 name、predict、data_typ 信息
+  // 配置 job 的 name、predict、data_typ 信息，将 PushJob 的结果保存到 job 中
   auto* job_conf = job->mutable_job_conf();
   job_conf->set_job_name(job_name);
   job_conf->mutable_predict_conf();
