@@ -230,5 +230,77 @@ https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
 
 
 ## MakePushJob
+PushJob:
+oneflow 遍历所有 User Job 中的 Input Op，针对每个 Input Op，分别构建一个对应的 Push Job。
+系统自动添加的 Push Job 用于接收输入数据，其 ForeignInput Op 内部维护一个buffer，该 buffer 等待 Python 端喂数据.
+
+MakePushJob：
+1. job_builder.AddOps 添加 foreign_input_op 的信息；
+2. job_builder 添加 output_op 的信息；
+3. 最后配置 job 的 name、predict、data_typ 信息。
+
+oneflow.cpp -> MakePushJob
+
+```.cpp
+/**
+PushJob:
+oneflow 遍历所有 User Job 中的 Input Op，针对每个 Input Op，分别构建一个对应的 Push Job。
+系统自动添加的 Push Job 用于接收输入数据，其 ForeignInput Op 内部维护一个buffer，该 buffer 等待 Python 端喂数据.
+
+MakePushJob：
+1. job_builder.AddOps 添加 foreign_input_op 的信息；
+2. job_builder 添加 output_op 的信息；
+3. 最后配置 job 的 name、predict、data_typ 信息。
+*/
+void MakePushJob(const std::string& job_name, const std::string& op_name,
+                 const ParallelBlobConf& parallel_blob_conf, Job* job) {
+  auto* flag_name2flag_value = job->mutable_job_conf()->mutable_flag_name2flag_value();
+  (*flag_name2flag_value)["__is_user_function__"].set_at_bool(false); // 标识当前 job 是系统级 job
+  auto* op_name2job_name =
+      Global<InterUserJobInfo>::Get()->mutable_input_or_var_op_name2push_job_name(); // 获取 User Job 中 op_name2job_name 
+  CHECK(op_name2job_name->find(op_name) == op_name2job_name->end());
+  (*op_name2job_name)[op_name] = job_name; // job_name 赋值给 op_name2job_name
+  DataType data_type;
+  JobBuilder job_builder(job); // 创建 JobBuilder 对象，将输入 job 的信息添加到 JobBuilder 的成员变量中。 
+
+  // 数据流：Data(Python 端) -> buffer(系统级 ForeignInput Op) 
+  OperatorConf foreign_input_op_conf; // ForeignInput Op 内部维护一个 buffer，该 buffer 等待 Python 端喂数据
+  {
+    // 1. 初始化 blob_conf(边信息): 设置 foreign_input_op_conf （点信息）的 name、out、buffer_name，并利用 op_conf（边）初始化 blob_conf（点）
+    // 2. 配置 parallel_conf 的 device 信息
+    // 3. 最后 job_builder.AddOps 添加 foreign_input_op 
+    foreign_input_op_conf.set_name(std::string("System-Push-ForeignInput_") + NewUniqueId());
+    auto* foreign_input_conf = foreign_input_op_conf.mutable_foreign_input_conf();
+    foreign_input_conf->set_out("out");
+    foreign_input_conf->set_ofblob_buffer_name(GetForeignInputBufferName(job_name));
+    auto* blob_conf = foreign_input_conf->mutable_blob_conf();
+    InterfaceOpUtil::InitBlobConf(blob_conf, parallel_blob_conf); // 利用 foreign_input_conf 初始化 blob_conf
+    data_type = blob_conf->data_type();
+    ParallelConf parallel_conf;
+    parallel_conf.set_device_tag("cpu");
+    parallel_conf.add_device_name("0:0");
+    job_builder.AddOps(parallel_conf, {foreign_input_op_conf}); // job_builder 添加 foreign_input_op 的信息 （parallel_conf，foreign_input_op_conf）
+  }
+
+  // 数据流：buffer(系统级 ForeignInput Op) -> GPU(系统级 Output Op)
+  OperatorConf output_op_conf;
+  {
+    output_op_conf.set_name(op_name);
+    auto* output_conf = output_op_conf.mutable_output_conf();
+    output_conf->set_in(foreign_input_op_conf.name() + "/out");
+    output_conf->set_out("out");
+    InterfaceOpUtil::InitBlobConf(output_conf->mutable_blob_conf(), parallel_blob_conf);
+    job_builder.AddOps(parallel_blob_conf.parallel_conf(), {output_op_conf});
+  } // job_builder 添加 output_op 的信息
+
+
+  // 配置 job 的 name、predict、data_typ 信息
+  auto* job_conf = job->mutable_job_conf();
+  job_conf->set_job_name(job_name);
+  job_conf->mutable_predict_conf();
+  job_conf->set_default_data_type(data_type);
+}
+
+```
 
 ## MakePullJob
