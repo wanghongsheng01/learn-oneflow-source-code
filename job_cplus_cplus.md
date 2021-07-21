@@ -233,7 +233,7 @@ FOR_RANGE(int64_t, job_id, 0, jobs.size()) {
 ## MakePushJob
 PushJob:
 oneflow 遍历所有 User Job 中的 Input Op，针对每个 Input Op，分别构建一个对应的 Push Job。
-系统自动添加的 Push Job 用于接收输入数据，其 ForeignInput Op 内部维护一个buffer，该 buffer 等待 Python 端喂数据.
+系统自动添加的 Push Job 用于接收输入数据，其 `ForeignInput Op` 内部维护一个buffer，该 buffer 等待 Python 端喂数据.
 
 MakePushJob 主要做三件事：
 1. job_builder.AddOps 添加 foreign_input_op 的信息；
@@ -307,3 +307,46 @@ void MakePushJob(const std::string& job_name, const std::string& op_name,
 ```
 
 ## MakePullJob
+系统添加的 Pull Job 专门用于处理输出数据，Pull Job 中有一个 `ForeignOutput Op`，其内部同样维护一个 buffer，当往该 buffer 内填完数据以后，python 端对应的 of blob 对象中的 numpy 就拷贝了对应的数据。从而完整整个从输入到输出的数据流转过程。
+
+oneflow.cpp -> MakePullJob
+```.cpp
+void MakePullJob(const std::string& job_name, const std::string& op_name,
+                 const ParallelBlobConf& parallel_blob_conf, Job* job) {
+  auto* flag_name2flag_value = job->mutable_job_conf()->mutable_flag_name2flag_value();
+  (*flag_name2flag_value)["__is_user_function__"].set_at_bool(false);
+  auto* op_name2job_name =
+      Global<InterUserJobInfo>::Get()->mutable_output_or_var_op_name2pull_job_name();
+  CHECK(op_name2job_name->find(op_name) == op_name2job_name->end());
+  (*op_name2job_name)[op_name] = job_name;
+  DataType data_type;
+  JobBuilder job_builder(job);
+  OperatorConf input_op_conf;
+  {
+    input_op_conf.set_name(op_name);
+    auto* input_conf = input_op_conf.mutable_input_conf();
+    input_conf->set_out("out");
+    auto* blob_conf = input_conf->mutable_blob_conf();
+    InterfaceOpUtil::InitBlobConf(blob_conf, parallel_blob_conf);
+    data_type = blob_conf->data_type();
+    job_builder.AddOps(parallel_blob_conf.parallel_conf(), {input_op_conf});
+  }
+  OperatorConf foreign_output_op_conf;
+  {
+    foreign_output_op_conf.set_name(std::string("System-Pull-ForeignOutput_") + NewUniqueId());
+    auto* foreign_output_conf = foreign_output_op_conf.mutable_foreign_output_conf();
+    foreign_output_conf->set_in(input_op_conf.name() + "/out");
+    foreign_output_conf->set_ofblob_buffer_name(GetForeignOutputBufferName(job_name));
+    ParallelConf parallel_conf;
+    parallel_conf.set_device_tag("cpu");
+    parallel_conf.add_device_name("0:0");
+    job_builder.AddOps(parallel_conf, {foreign_output_op_conf});
+  }
+  auto* job_conf = job->mutable_job_conf();
+  job_conf->set_job_name(job_name);
+  job_conf->mutable_predict_conf();
+  job_conf->set_default_data_type(data_type);
+}
+```
+
+
