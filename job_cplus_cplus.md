@@ -138,7 +138,7 @@ void MakeModelInitJob(
   2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()<br>
   3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里<br>
 
-job_builder.cpp -> void JobBuilder::AddOps<br>
+job_builder.cpp -> JobBuilder::AddOps<br>
 ```.cpp
 // 将待添加的 op 的 op_conf 添加到 job_ 里，同时将新添加的（op_conf.name(), mut_op_conf）写入 op_name2op_conf_ 中，
 // 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
@@ -171,7 +171,7 @@ void JobBuilder::AddOps(const ParallelConf& parallel_conf,
 }
 ```
 
-model_io_v2_job.cpp -> void MakeModelIoV2Jobs<br>
+model_io_v2_job.cpp -> MakeModelIoV2Jobs<br>
 ```.cpp
 // MakeModelIoV2Jobs(jobs, var_op_name2parallel_blob_conf, AppendJob);
 void MakeModelIoV2Jobs(const std::vector<std::shared_ptr<Job>>& jobs,
