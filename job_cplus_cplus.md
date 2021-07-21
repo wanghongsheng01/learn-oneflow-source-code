@@ -37,7 +37,11 @@ void FilterOpName2ParallelBlobConf(
 }
 ```
 
-# 几个 Job
+# 系统级 Job
+
+1. user job： 即用户定义的 job，通常为训练或者预测任务；
+2. push/pull job： 则是在用户的 user job 编译为可执行 plan 时，系统自动添加的用于处理输入输出的系统级 job；
+3. model io job：则是用于初始化/保存/加载模型的系统级 job。
 
 代码功能——编译期数据流转
 
