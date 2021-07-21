@@ -52,7 +52,7 @@ https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
 系统自动添加的 Push Job 用于接收输入数据，其 ForeignInput Op 内部维护一个 buffer，该 buffer 等待 Python 端喂数据；Push Job 处理完输入数据 X1 后，由于 X1 在 Push Job 和 User Job 间是内存共享的，可以直接被 User Job 所消费，从而继续被 Op_a、Op_b 处理，最后得到输出数据 Y1；同样，系统添加的 Pull Job 专门用于处理输出数据，Pull Job 中有一个 ForeignOutput Op，其内部同样维护一个 buffer，当往该 buffer 内填完数据以后，python 端对应的 of blob 对象中的 numpy 就拷贝了对应的数据。从而完整整个从输入到输出的数据流转过程。
 
 
-## MakeModelIoJobs && MakeModelIoV2Jobs<br>
+# MakeModelIoJobs && MakeModelIoV2Jobs<br>
 
 MakeModelInitJob 干了啥？<br>
 JobBuilder 类对象通过 `job_builder.AddOps(Device 信息，即 parallel_conf , {xxx_op_conf 的 vector})` 将 op 信息添加到<br>
@@ -230,7 +230,7 @@ FOR_RANGE(int64_t, job_id, 0, jobs.size()) {
 ```
 
 
-## MakePushJob
+# MakePushJob
 PushJob:
 oneflow 遍历所有 User Job 中的 Input Op，针对每个 Input Op，分别构建一个对应的 Push Job。
 系统自动添加的 Push Job 用于接收输入数据，其 `ForeignInput Op` 内部维护一个buffer，该 buffer 等待 Python 端喂数据.
@@ -306,7 +306,7 @@ void MakePushJob(const std::string& job_name, const std::string& op_name,
 
 ```
 
-## MakePullJob
+# MakePullJob
 系统添加的 Pull Job 专门用于处理输出数据，Pull Job 中有一个 `ForeignOutput Op`，其内部同样维护一个 buffer，当往该 buffer 内填完数据以后，python 端对应的 of blob 对象中的 numpy 就拷贝了对应的数据。从而完整整个从输入到输出的数据流转过程。
 
 oneflow.cpp -> MakePullJob
@@ -349,4 +349,5 @@ void MakePullJob(const std::string& job_name, const std::string& op_name,
 }
 ```
 
+# CompileJobsAndMergePlans
 
