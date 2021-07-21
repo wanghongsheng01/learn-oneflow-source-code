@@ -351,6 +351,10 @@ void MakePullJob(const std::string& job_name, const std::string& op_name,
 
 # CompileCurJobOnMaster
 
+# compiler.cpp -> Compiler::Compile
+
+# job_completer.cpp -> JobCompleter::Complete(Job* job)
+
 
 # CompileJobsAndMergePlans
 
