@@ -202,11 +202,13 @@ void MakeModelIoV2Jobs(const std::vector<std::shared_ptr<Job>>& jobs,
 ```
 
 * FilterVariableOps 干啥的？<br>
-  过滤掉 jobs 中其它 op，只保留 variable_op。逐个校验 jobs 中当前 job 里 var_op 与 var_op_name2op_conf 的 variable_conf 是否相等。<br>
+  1. 因为 Model Init/Load/Save 都是只针对 variable_op，所以需要将 variable_op 从当前 jobs 的 op 中过滤出来。<br>
+  2. 过滤掉 jobs 中其它 op，只保留 variable_op。逐个校验 jobs 中当前 job 里 var_op 与 var_op_name2op_conf 的 variable_conf 是否相等。<br>
   
   model_io_v2_job.cpp -> FilterVariableOps<br>
   ```.cpp
-  // 过滤掉 jobs 中其它 op，只保留 variable_op。逐个校验 jobs 中当前 job 里 var_op 与 var_op_name2op_conf 的 variable_conf 是否相等
+  // 因为 Model Init/Load/Save 都是只针对 variable_op，所以需要将 variable_op 从当前 jobs 的 op 中过滤出来。
+  // 过滤掉 jobs 中其它 op，只保留 variable_op。逐个校验 jobs 中当前 job 里 var_op 与 var_op_name2op_conf 的 variable_conf 是否相等。
   void FilterVariableOps(const std::vector<std::shared_ptr<Job>>& jobs,
                          HashMap<std::string, OperatorConf>* var_op_name2op_conf) {
     FOR_RANGE(int64_t, job_id, 0, jobs.size()) {
