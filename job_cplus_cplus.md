@@ -54,8 +54,7 @@ https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
 * 每个 Variable 单独一个 Op 去处理<br>
 
 * MakeModelInitJob 干了啥？<br>
-  JobBuilder 类对象通过 `job_builder.AddOps(Device 信息，即 parallel_conf , {xxx_op_conf 的 vector})` <br>
-  添加到 JobBuilder::job_ 、 JobBuilder::op_name2op_conf_ 、  PlacementGroup 里。<br>
+  JobBuilder 类对象通过 `job_builder.AddOps(Device 信息，即 parallel_conf , {xxx_op_conf 的 vector})` 将 op 信息添加到 JobBuilder::job_ 、 JobBuilder::op_name2op_conf_ 、  PlacementGroup 里。<br>
 
   1. JobBuilder 对象添加 foreign_input_op、tick_op 的信息<br>
      `job_builder.AddOps(master_parallel_conf, {foreign_input_op_conf, tick_op_conf}); // 参数包括 Device、foreign_input、tick 信息`<br>
@@ -67,14 +66,6 @@ https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
      `job_builder.AddOps(pair.first, {model_init_op_conf}); // job_builder 添加 model_init_op 的信息（parallel_conf，model_init_op_conf）`<br>
 
   MakeModelLoadJob/MakeModelSaveJob 的流程与 MakeModelInitJob 一摸一样。<br>
-
-* job_builder.AddOps(parallel_conf 信息, {xxx_op_conf 的 vector}) 干了啥？
-  将新添加 op 的 op_conf、op_conf、parallel_conf 信息更新（赋值）到 JobBuilder 类对象的成员变量中。
-
-  1. JobBuilder::job_: 用新添加 Op 的 op_conf 初始化 JobBuilder::job_ 的 OperatorConf
-  2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()
-  3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
-
 
 model_io_v2_job.cpp<br> 
 ```.cpp
@@ -141,6 +132,13 @@ void MakeModelInitJob(
   }
 }
 ```
+
+* job_builder.AddOps(parallel_conf 信息, {xxx_op_conf 的 vector}) 干了啥？
+  将新添加 op 的 op_conf、op_conf、parallel_conf 信息更新（赋值）到 JobBuilder 类对象的成员变量中。
+
+  1. JobBuilder::job_: 用新添加 Op 的 op_conf 初始化 JobBuilder::job_ 的 OperatorConf
+  2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()
+  3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
 
 job_builder.cpp -> void JobBuilder::AddOps
 ```.cpp
