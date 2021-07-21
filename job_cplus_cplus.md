@@ -201,7 +201,28 @@ void MakeModelIoV2Jobs(const std::vector<std::shared_ptr<Job>>& jobs,
 
 ```
 
-* FilterVariableOps 干啥的？
+* FilterVariableOps 干啥的？<br>
+  过滤掉 jobs 中其它 op，只保留 variable_op。逐个校验 jobs 中当前 job 里 var_op 与 var_op_name2op_conf 的 variable_conf 是否相等。<br>
+  
+  model_io_v2_job.cpp -> FilterVariableOps<br>
+  ```.cpp
+  // 过滤掉 jobs 中其它 op，只保留 variable_op。逐个校验 jobs 中当前 job 里 var_op 与 var_op_name2op_conf 的 variable_conf 是否相等
+  void FilterVariableOps(const std::vector<std::shared_ptr<Job>>& jobs,
+                         HashMap<std::string, OperatorConf>* var_op_name2op_conf) {
+    FOR_RANGE(int64_t, job_id, 0, jobs.size()) {
+      for (const OperatorConf& op_conf : jobs.at(job_id)->net().op()) {
+        if (op_conf.has_variable_conf()) { // 过滤掉 jobs 中其它 op，只保留 variable_op
+          if (var_op_name2op_conf->find(op_conf.name()) == var_op_name2op_conf->end()) {
+            CHECK(var_op_name2op_conf->emplace(op_conf.name(), op_conf).second);
+          } else {
+            CHECK(CompareVariableOpConf(var_op_name2op_conf->at(op_conf.name()).variable_conf(),
+                                        op_conf.variable_conf())); // 逐个校验 jobs 中当前 job 里 var_op 与 var_op_name2op_conf 的 variable_conf 是否相等
+          }
+        }
+      }
+    }
+  }
+  ```
 
 ## MakeModelIoJobs
 
