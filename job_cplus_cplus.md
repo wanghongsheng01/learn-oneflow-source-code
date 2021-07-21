@@ -53,8 +53,6 @@ https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
 ## MakeModelIoV2Jobs<br>
 * 每个 Variable 单独一个 Op 去处理<br>
 
-model_io_v2_job.cpp<br>
-
 * MakeModelInitJob 干了啥？<br>
   JobBuilder 类对象通过 `job_builder.AddOps(Device 信息，即 parallel_conf , {xxx_op_conf 的 vector})` <br>
   添加到 JobBuilder::job_ 、 JobBuilder::op_name2op_conf_ 、  PlacementGroup 里。<br>
@@ -78,7 +76,7 @@ model_io_v2_job.cpp<br>
   3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
 
 
-  
+model_io_v2_job.cpp<br> 
 ```.cpp
 // MakeModelInitJob("System-ModelInit", &model_init_job, var_op_name2op_conf, var_op_name2parallel_blob_conf);
 void MakeModelInitJob(
