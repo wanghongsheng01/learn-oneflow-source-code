@@ -351,16 +351,8 @@ std::atomic<void*> comm_net_token_; 对 int, char, bool 等数据结构进行�
 
 Plan 所包含的部分数据结构整理<br>
 Plan<br>
-  |-----task
-         |-----------produced_regst_desc
-                         |------------<string, RegstDescProto>
-                                                    |------regst_desc_id
-         |-----------parallel_ctx
-                         |------------int64 parallel_id
-                         |------------int64 parallel_num
-  |---ctrl_regst_desc_info
-        |-----------ctrl_regst_desc_id2producer_task_id
-                        |-------------map<int64, int64>
+  ![image](https://user-images.githubusercontent.com/31394900/126755976-af9a882e-6c3f-4084-805e-36a62c981705.png)
+
 			
 NewBlobsInOneRegst()<br>
 在一个 Regst 中创建 Blobs<br>
