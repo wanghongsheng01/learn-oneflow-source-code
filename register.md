@@ -186,3 +186,104 @@ int main()
    一个 actor 可以写多个 regist
    
    
+   register_manager.cpp -> `RegstMgr::RegstMgr`
+   ```.cpp
+   char* chunk_ptr = Global<MemoryAllocator>::Get()->Allocate(chunk.mem_case(), chunk.mem_size());
+   ```
+   
+   memory_allocator.cpp -> `void* MemoryAllocatorImpl::Allocate(MemoryCase mem_case, size_t size)`
+	 
+   ```.cpp
+    void* MemoryAllocatorImpl::Allocate(MemoryCase mem_case, size_t size) {
+		void* ptr = nullptr;
+		// 如果是 host，则 cudaMallocHost 分配 chunk 内存空间
+		if (mem_case.has_host_mem()) 
+		{
+			if (mem_case.host_mem().has_cuda_pinned_mem()) {
+	#ifdef WITH_CUDA
+				if (Global<ResourceDesc, ForSession>::Get()->enable_numa_aware_cuda_malloc_host()) {
+					NumaAwareCudaMallocHost(mem_case.host_mem().cuda_pinned_mem().device_id(), &ptr, size);
+				} else {
+					OF_CUDA_CHECK(cudaMallocHost(&ptr, size));
+				}
+	#else
+				UNIMPLEMENTED();
+	#endif
+			} else {
+				ptr = malloc(size);
+				CHECK_NOTNULL(ptr);
+			}
+		} 
+		// 如果是 CUDA，则 cudaMalloc 分配 chunk 内存空间
+		else if (mem_case.has_device_cuda_mem()) 
+		{
+	#ifdef WITH_CUDA
+			CudaCurrentDeviceGuard guard(mem_case.device_cuda_mem().device_id());
+			OF_CUDA_CHECK(cudaMalloc(&ptr, size));
+	#else
+			UNIMPLEMENTED();
+	#endif
+		} else {
+			UNIMPLEMENTED();
+		}
+		return ptr;
+	}
+   ```
+	 
+register_manager.cpp -> `void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto, std::function<void(Regst*)> OneRegstDone)` 
+new 出来的 regist，最终回调到 RegstMgr::NewRegsts 的调用者里 actor.cpp 的 lambda 函数里。最终 regist 保存到 Actor::produced_regsts_ 成员变量(Actor 写的 regist 成员变量)
+
+```.cpp
+void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto,
+                         std::function<void(Regst*)> OneRegstDone) {
+  const int64_t regst_desc_id = regst_desc_proto.regst_desc_id();
+  const RegstDescTypeProto& regst_desc_type = regst_desc_proto.regst_desc_type();
+  const RtRegstDesc* rt_regst_desc = regst_desc_id2rt_regst_desc_.at(regst_desc_id).get();
+  char* main_mem_ptr = nullptr;
+  char* separated_header_mem_ptr = nullptr;
+  int64_t mem_block_id = regst_desc_proto.mem_block_id();
+  int64_t header_block_id = regst_desc_proto.separated_header_mem_block_id();
+  if (mem_block_id != -1 && mem_block_id2ptr_.find(mem_block_id) != mem_block_id2ptr_.end()) {
+    main_mem_ptr = mem_block_id2ptr_.at(mem_block_id) + regst_desc_proto.mem_block_offset();
+  }
+  if (header_block_id != -1 && mem_block_id2ptr_.find(header_block_id) != mem_block_id2ptr_.end()) {
+    separated_header_mem_ptr = mem_block_id2ptr_.at(header_block_id);
+  }
+  std::vector<LbiBlobDescPair> lbi_pairs;
+  if (regst_desc_type.has_data_regst_desc()) {
+    for (const LbiBlobDescPair& pair : regst_desc_type.data_regst_desc().lbi2blob_desc()) {
+      lbi_pairs.push_back(pair);
+    }
+    std::sort(lbi_pairs.begin(), lbi_pairs.end(), &CompareLbiBlobDescPair);
+    CHECK(!lbi_pairs.empty());
+  }
+  for (int64_t i = 0; i < rt_regst_desc->register_num(); ++i) {
+    Regst* regst = new Regst;
+    regst->set_regst_desc(rt_regst_desc);
+    if (regst_desc_type.has_data_regst_desc()) {
+      NewBlobsInOneRegst(lbi_pairs, regst, rt_regst_desc, main_mem_ptr, separated_header_mem_ptr);
+      if (rt_regst_desc->mem_case().has_host_mem()
+          && rt_regst_desc->mem_case().host_mem().used_by_network()) {
+        CheckBlobInRegstNotDisabled(regst_desc_proto);
+        regst->comm_net_token_ = Global<CommNet>::Get()->RegisterMemory(
+            main_mem_ptr, rt_regst_desc->MainByteSize4OneRegst());
+      }
+      if (main_mem_ptr != nullptr) { main_mem_ptr += rt_regst_desc->MainByteSize4OneRegst(); }
+      if (separated_header_mem_ptr != nullptr) {
+        separated_header_mem_ptr += rt_regst_desc->SeparatedHeaderByteSize4OneRegst();
+      }
+    } else if (regst_desc_type.has_ctrl_regst_desc()) {
+      // do nothing
+    } else {
+      UNIMPLEMENTED();
+    }
+    OneRegstDone(regst); // new 出来的 regist，最终回调到 RegstMgr::NewRegsts 的调用者里 actor.cpp 的 lambda 函数里
+    /*
+    [this](Regst* regst) {
+      produced_regsts_[regst->regst_desc_id()].emplace_back(regst); // Actor::produced_regsts_ 成员变量，Actor 的写的 regist 成员变量
+    }
+    */
+  }
+}
+```
+
