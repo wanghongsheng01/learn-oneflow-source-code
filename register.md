@@ -145,3 +145,28 @@ int main()
 对比效果，页锁定内存的访问时间约为可分页内存的访问时间的一半.<br>
 
 2. RDMA 远程直接内存访问
+
+3. RegstMgr：负责创建所有的 Regst （ Mgr 是 Manager 的缩写）
+   oneflow/core/register/ 路径
+   在初始化全局对象时，会创建 Global 对象 RegstMgr，`Global<RegstMgr>` 类是 `RegstMgr` 类的 `private friend class`，单例模式
+   每台机器上的 RegstMgr 管理了所有的 Regst。
+   RegstMgr 在初始化时就会根据 Plan 申请所有的本机上的内存：HostMemory、HostPinnedMemory（For CUDA CopyH2D）、DeviceMemory、LockedMemory（For RDMA）等。
+   并根据 Plan 中的 Regst 配置信息分配相应的内存地址给 Regst。Regst 的内存地址是固定的，直到运行时结束 Regst 的内存地址和大小都不会变化。OneFlow 的静态内存管理是 Runtime 启动时统一分配，    Runtime 结束时统一销毁。运行时的内存调度开销是 0。
+   
+4. regist
+   regist 是一段存储空间，可能在 CPU/GPU/Device 上。runtime 时有 actor 处理数据，actor 输出完的数据写入 register，其它 actor 从 register 里读取数据。
+   register 里包含一个 blob，一个 blob 是一个输入。
+   
+ 5. blob
+    存储描述数据属性，shape、 datatype、shape_dynamic
+    
+ 6. danamic 
+    编译期不能确定 shape 具体是大小，但可以确定变化范围。编译期将最大范围的值交给运行时，运行时分配最大的空间去运行。
+    
+7. RegstMgr
+   RegistMgr 管理所有 regist，把所有 regist 目录下的 regist 串起来，最终完成空间的分配。
+   RegistMgr 完成就是这个存储空间的设计。
+  
+   MemBlock与Chunk
+   这是 OneFlow 的多级内存设计：Chunk -> MemBlock -> Regst
+
