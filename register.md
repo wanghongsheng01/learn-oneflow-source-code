@@ -288,44 +288,44 @@ void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto,
 }
 ```
 Regst相关概念
-1. RegstDesc 编译期的 Regst 描述类（C++），提供元信息，关联 Task，包含 mem block，包含 regst_num。RegstDesc 与Regst是一对多的关系（相邻 Actor 流水并行执行的关键）。
-   TaskNode 的 Build 过程中的 Produce/Consume Regst 就是在创建和消费 RegstDesc。
-2. RegstDescProto 配置文件的 proto 描述，存储在 Plan 中.
-3. RtRegstDesc 运行时的 Regst 描述类（C++），关联 Actor，提供计算 Size 的接口.
-4. Regst 运行时的 Regst，存储真正的 blob 内存，被 Actor 所管理。
+1. RegstDesc 编译期的 Regst 描述类（C++），提供元信息，关联 Task，包含 mem block，包含 regst_num。RegstDesc 与Regst是一对多的关系（相邻 Actor 流水并行执行的关键）。<br>
+   TaskNode 的 Build 过程中的 Produce/Consume Regst 就是在创建和消费 RegstDesc。<br>
+2. RegstDescProto 配置文件的 proto 描述，存储在 Plan 中.<br>
+3. RtRegstDesc 运行时的 Regst 描述类（C++），关联 Actor，提供计算 Size 的接口.<br>
+4. Regst 运行时的 Regst，存储真正的 blob 内存，被 Actor 所管理。<br>
 
-关系：RegstDesc（Compiler）-> RegstDescProto（Plan）-> RtRegstDesc（Runtime）-> Regst（Runtime， 1 to n）
+关系：RegstDesc（Compiler）-> RegstDescProto（Plan）-> RtRegstDesc（Runtime）-> Regst（Runtime， 1 to n）<br>
 
 Blob相关概念
-1. BlobDesc 编译期的 Blob 描述类（C++），提供元信息：Shape、DataType；Op 的 InferBlobDesc 就是在推导 BlobDesc。
-2. BlobDescProto Blob 配置文件的 Proto 描述，存储在 Plan 中（ RegstDescProto 中）
-3. RtBlobDesc 运行时的 Blob 描述类，跟 BlobDesc 的区别是提供 Header 和 Body 的 Size/CudaAlignedSize
-4. Blob 运行时 Kernel 操作的基本数据对象。存储在 Regst 中。
+1. BlobDesc 编译期的 Blob 描述类（C++），提供元信息：Shape、DataType；Op 的 InferBlobDesc 就是在推导 BlobDesc。<br>
+2. BlobDescProto Blob 配置文件的 Proto 描述，存储在 Plan 中（ RegstDescProto 中）<br>
+3. RtBlobDesc 运行时的 Blob 描述类，跟 BlobDesc 的区别是提供 Header 和 Body 的 Size/CudaAlignedSize<br>
+4. Blob 运行时 Kernel 操作的基本数据对象。存储在 Regst 中。<br>
 
-Job 由 Op 组成、plan 由 TaskNode 组成
+Job 由 Op 组成、plan 由 TaskNode 组成<br>
 
-RegstMgr 的成员有 HashMap regst_desc_id2rt_regst_desc_，实现 regst_desc_id 到 rt_regst_desc 的映射
+RegstMgr 的成员有 HashMap regst_desc_id2rt_regst_desc_，实现 regst_desc_id 到 rt_regst_desc 的映射<br>
 
-RegstDesc 编译期的 Regst 描述类（C++），提供元信息，关联 TaskNode ，包含 mem block，包含 regst_num。RegstDesc 与 Regst 是一对多的关系（同一个 actor 的多个 Regst 共用一个 RegstDesc 描述子，相邻 Actor 流水并行执行的关键）。
+RegstDesc 编译期的 Regst 描述类（C++），提供元信息，关联 TaskNode ，包含 mem block，包含 regst_num。RegstDesc 与 Regst 是一对多的关系（同一个 actor 的多个 Regst 共用一个 RegstDesc 描述子，相邻 Actor 流水并行执行的关键）。<br>
 
-TaskNode: TaskNode 是 actor 的编译期抽象，actor 是 TaskNode 的运行时抽象
+TaskNode: TaskNode 是 actor 的编译期抽象，actor 是 TaskNode 的运行时抽象<br>
 
 BlobDesc:
-1. BlobDesc 编译期的 Blob 描述类（C++），提供元信息：Shape、DataType；Op 的 InferBlobDesc 就是在推导 BlobDesc
-2. Shape 用来描述 Blob 形状的的类，里面包含两个数据成员：elem_cnt_ 代表元素的个数、dim_vec_   是一个包含20个 int64_t 元素的数据 std::array 用于记录各个维度的大小。
-3. data_type_ 成员表明数据类型(其中 kTensorBuffer 代表 CPU 上的纯动态形状，编译期也无法获取最大 shape 那种，OFRecord decode 出来就是这个类型)
-4. is_dynamic_ 成员表明运行时是否需要重新推导 shape，指的是编译期推导出一个最大形状的情形。
+1. BlobDesc 编译期的 Blob 描述类（C++），提供元信息：Shape、DataType；Op 的 InferBlobDesc 就是在推导 BlobDesc<br>
+2. Shape 用来描述 Blob 形状的的类，里面包含两个数据成员：elem_cnt_ 代表元素的个数、dim_vec_   是一个包含20个 int64_t 元素的数据 std::array 用于记录各个维度的大小。<br>
+3. data_type_ 成员表明数据类型(其中 kTensorBuffer 代表 CPU 上的纯动态形状，编译期也无法获取最大 shape 那种，OFRecord decode 出来就是这个类型)<br>
+4. is_dynamic_ 成员表明运行时是否需要重新推导 shape，指的是编译期推导出一个最大形状的情形。<br>
 
-RegstDescTypeProto:
-RegstDescTypeProto 描述了 Regst 描述子的类型信息，Regst 描述子共有两种类型：数据平面描述子和控制平面描述子，控制平面描述子是空的，数据平面描述子包含两个成员。
+RegstDescTypeProto:<br>
+RegstDescTypeProto 描述了 Regst 描述子的类型信息，Regst 描述子共有两种类型：数据平面描述子和控制平面描述子，控制平面描述子是空的，数据平面描述子包含两个成员。<br>
 
-Blob 运行时 Kernel 操作的基本数据对象，存储在 Regst 中
-1. 包含 BlobDesc  
-2. 指向数据的指针 dptr_
-3. 指向动态 shape 的指针 header_ptr_
-4. shape_view 用来获取各个维度信息及其乘积的类
+Blob 运行时 Kernel 操作的基本数据对象，存储在 Regst 中<br>
+1. 包含 BlobDesc  <br>
+2. 指向数据的指针 dptr_<br>
+3. 指向动态 shape 的指针 header_ptr_<br>
+4. shape_view 用来获取各个维度信息及其乘积的类<br>
 
-RtRegstDesc 运行时的 Regst 描述类（C++），关联 Actor，提供计算 Size 的接口
+RtRegstDesc 运行时的 Regst 描述类（C++），关联 Actor，提供计算 Size 的接口<br>
 1. regst_desc_id
 2. 生产者 id
 3. 消费者 id
@@ -336,34 +336,34 @@ RtRegstDesc 运行时的 Regst 描述类（C++），关联 Actor，提供计算 
 8. Blob 描述子
 9. Lbi 等等
 
-Regst
-Regst 是 OneFlow 运行时的基本内存单元，也是基本的消息单元，Actor 之间的通信、所有的数据生产、消费、回收都是 Regst。由于 OneFlow 是静态内存分配，内存的分时复用调度是编译期的内存复用算法已经做好了（通过控制边+ offset 方式），所以运行时仅需要按照编译期生成的 MemChunk、MemBlock、Regst 的配置描述（RegstDescProto）信息一次性申请内存，并分配给对应的Regst 即可。
+Regst<br>
+Regst 是 OneFlow 运行时的基本内存单元，也是基本的消息单元，Actor 之间的通信、所有的数据生产、消费、回收都是 Regst。由于 OneFlow 是静态内存分配，内存的分时复用调度是编译期的内存复用算法已经做好了（通过控制边+ offset 方式），所以运行时仅需要按照编译期生成的 MemChunk、MemBlock、Regst 的配置描述（RegstDescProto）信息一次性申请内存，并分配给对应的Regst 即可。<br>
 
-Regst 存储了两类信息：
-1. 生产者 Actor id 和消费者 Actor ids。一个 Regst 的生产者是唯一的，消费者可能有多个。
-2. 一个 Regst 支持同时只能有一个 Actor 写入数据，支持多个 Actor  同时读数据。
-3. Blob 的信息
-   由于历史原因（在介绍 ExecGraph 和 ExecNode 时也提到了），Actor 内部可能会有一个执行子图（多个 op/kernel），Actor 的生产/消费 Regst 均可能包含多个 Blob（Tensor）。一个 Actor 可以产    出多个 regist。Regst 需要管理 blob name in op -> logical blob id -> blob 的映射（blob name in op -> logical blob id 是 op 自己管理的），使得 Kernel 在执行时可以直接根据      blob name 拿到对应的 blob 指针。
+Regst 存储了两类信息：<br>
+1. 生产者 Actor id 和消费者 Actor ids。一个 Regst 的生产者是唯一的，消费者可能有多个。<br>
+2. 一个 Regst 支持同时只能有一个 Actor 写入数据，支持多个 Actor  同时读数据。<br>
+3. Blob 的信息<br>
+   由于历史原因（在介绍 ExecGraph 和 ExecNode 时也提到了），Actor 内部可能会有一个执行子图（多个 op/kernel），Actor 的生产/消费 Regst 均可能包含多个 Blob（Tensor）。一个 Actor 可以产    出多个 regist。Regst 需要管理 blob name in op -> logical blob id -> blob 的映射（blob name in op -> logical blob id 是 op 自己管理的），使得 Kernel 在执行时可以直接根据      blob name 拿到对应的 blob 指针。<br>
    
-Regst 
-status_ 是为了 Regst 的信息和其他模块共享，piece_id 和 act_id 可以理解为计数器。
-std::atomic<void*> comm_net_token_; 对 int, char, bool 等数据结构进行原子性封装，多线程环境中对 std::atomic 对象访问不会造成竞争-冒险。
+Regst <br>
+status_ 是为了 Regst 的信息和其他模块共享，piece_id 和 act_id 可以理解为计数器。<br>
+std::atomic<void*> comm_net_token_; 对 int, char, bool 等数据结构进行原子性封装，多线程环境中对 std::atomic 对象访问不会造成竞争-冒险。<br>
 
-Plan 所包含的部分数据结构整理
-Plan
-  |-----task
-         |-----------produced_regst_desc
-                         |------------<string, RegstDescProto>
-                                                    |------regst_desc_id
-         |-----------parallel_ctx
-                         |------------int64 parallel_id
-                         |------------int64 parallel_num
-  |---ctrl_regst_desc_info
-        |-----------ctrl_regst_desc_id2producer_task_id
-                        |-------------map<int64, int64>
+Plan 所包含的部分数据结构整理<br>
+Plan<br>
+  |-----task<br>
+         |-----------produced_regst_desc<br>
+                         |------------<string, RegstDescProto><br>
+                                                    |------regst_desc_id<br>
+         |-----------parallel_ctx<br>
+                         |------------int64 parallel_id<br>
+                         |------------int64 parallel_num<br>
+  |---ctrl_regst_desc_info<br>
+        |-----------ctrl_regst_desc_id2producer_task_id<br>
+                        |-------------map<int64, int64><br>
 			
-NewBlobsInOneRegst()
-在一个 Regst 中创建 Blobs
+NewBlobsInOneRegst()<br>
+在一个 Regst 中创建 Blobs<br>
 
 
 
