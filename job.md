@@ -1,43 +1,54 @@
-编译期的 C++ 
+# 梳理关系
 
-oneflow.h
-
-
-## oneflow.cpp::FilterOpName2ParallelBlobConf<br>
-
-FilterOpName2ParallelBlobConf 干了啥？<br>
-获取当前 job 中需要内存复用的 OpBlob 的信息，将当前 job 的 (op_conf，parallel_blob_conf）信息添加到 op_name2parallel_blob_conf 集合里。<br>
+oneflow.cpp
 
 ```.cpp
-/**
-FilterOpName2ParallelBlobConf：获取当前 job 中需要内存复用的 OpBlob 的信息，将当前 job 的 (op_conf，parallel_blob_conf）信息添加到 op_name2parallel_blob_conf 集合里。
-判断当前 job 的 op_conf.op_type_case() 是否在匹配集合 match 对象 （OperatorConf::OpTypeCase 类型）里：
-如果有，获取当前 job 中需要内存复用的 OpBlob 的信息。再判断当前 job 的 op_conf 是否在 op_name2parallel_blob_conf 集合里：
-如果有，则校验两者的 parallel_blob_conf 是否相等；
-如果没有，则 op_name2parallel_blob_conf 添加当前 job 的信息。
+Maybe<void> CompileJobsAndMergePlans(const PbRpf<Job>& job_confs, Plan& plan){
 
-*/
-void FilterOpName2ParallelBlobConf(
-    const HashSet<OperatorConf::OpTypeCase>& match, const std::vector<std::shared_ptr<Job>>& jobs,
-    HashMap<std::string, ParallelBlobConf>* op_name2parallel_blob_conf) {
-  FOR_RANGE(int64_t, job_id, 0, jobs.size()) {
-    JobBuilder job_builder(jobs.at(job_id).get()); // 根据 job 对象，构造了 job_builder 对象
-    for (const OperatorConf& op_conf : jobs.at(job_id)->net().op()) {
-      if (match.find(op_conf.op_type_case()) == match.end()) { continue; } // 若当前 job 的 op_conf.op_type_case() 不在 OperatorConf::OpTypeCase 匹配集合 match 里，则跳过进入下一个 job 循环
-      ParallelBlobConf parallel_blob_conf; 
-      GetMemSharingOpBlobInfo(job_builder, op_conf.name(), &parallel_blob_conf); // 获取当前 job 中需要内存复用的 OpBlob 的信息
-      auto iter = op_name2parallel_blob_conf->find(op_conf.name());
-      if (iter == op_name2parallel_blob_conf->end()) { // 判断 op_name2parallel_blob_conf 是否存在当前 job 的 (op_conf，parallel_blob_conf）信息
-        CHECK(op_name2parallel_blob_conf->emplace(op_conf.name(), parallel_blob_conf).second); // 如果没有，则 op_name2parallel_blob_conf 添加当前 job 的信息
-      } else {
-        CHECK(parallel_blob_conf == iter->second); // 如果有，则校验两者的 parallel_blob_conf 是否相等
-      }
-    }
-  }
+MakeModelIoJobs/MakeModelIoV2Jobs
+MakePushJob
+MakePullJob
+
+CompileCurJobOnMaster(jobs.at(i).get(), &sub_plans.at(i), true)
+
+
+MergeSubPlanWithoutGenNetTopo(&plan, std::move(sub_plans))
+
+InterJobMemSharingUtil::MergeMemReusedChunkBetweenUserJobs(function_jobs, &plan);
+InterJobMemSharingUtil::MergeMemSharedInterfaceMemBlockBetweenJobs(jobs, &plan);
+PlanUtil::SetForceInplaceMemBlock(&plan);
+FinishGlobalCriticalSectionDesc(plan, jobs.size());
+
+MakeMainJob(&main_job, &identity_tick_op_names, &lock_back_edges)
+
+CompileMainJob(&main_job, lock_back_edges, jobs.size(), &main_plan)
+
+LinkMainPlan(&plan, std::move(main_plan), identity_tick_op_names)
+
+PlanUtil::CleanUselessMemBlockAndCheckValid(&plan)
+
+DumpCtrlRegstInfoToPlan(&plan)
+
 }
+
 ```
 
+Compile Jobs && Merge Plans
+![CompileJob](https://user-images.githubusercontent.com/31394900/127262657-e0506b2d-e02f-42c7-a3c3-84764079b322.png)
+
+
 # 系统级 Job
+
+oneflow.cpp -> CompileJobsAndMergePlans 函数 -> MakeXXXJob 函数
+```.cpp
+CompileJobsAndMergePlans(){
+...
+MakeModelIoJobs/MakeModelIoV2Jobs
+MakePushJob
+MakePullJob
+...
+}
+```
 
 1. user job： 即用户定义的 job，通常为训练或者预测任务；
 2. push/pull job： 则是在用户的 user job 编译为可执行 plan 时，系统自动添加的用于处理输入输出的系统级 job；
@@ -47,12 +58,13 @@ void FilterOpName2ParallelBlobConf(
 
 从数据层面看一下 User Job 的运行过程：首先，User Job 可能有多个输入、多个输出，oneflow 会遍历所有 User Job 中的 Input Op 和 Return Op，针对每个 Input Op，分别构建一个对应的 Push Job；针对每个 Return Op，分别构建一个对应的 Pull Job。
 
-https://pic4.zhimg.com/v2-562d89a68926fd1c3905d9270d34f917_r.jpg
+![IO Job](https://user-images.githubusercontent.com/31394900/127281062-c1b6355c-954d-4eca-b657-0731735f3d14.png)
+
 
 系统自动添加的 Push Job 用于接收输入数据，其 ForeignInput Op 内部维护一个 buffer，该 buffer 等待 Python 端喂数据；Push Job 处理完输入数据 X1 后，由于 X1 在 Push Job 和 User Job 间是内存共享的，可以直接被 User Job 所消费，从而继续被 Op_a、Op_b 处理，最后得到输出数据 Y1；同样，系统添加的 Pull Job 专门用于处理输出数据，Pull Job 中有一个 ForeignOutput Op，其内部同样维护一个 buffer，当往该 buffer 内填完数据以后，python 端对应的 of blob 对象中的 numpy 就拷贝了对应的数据。从而完整整个从输入到输出的数据流转过程。
 
 
-# MakeModelIoJobs && MakeModelIoV2Jobs<br>
+## MakeModelIoJobs && MakeModelIoV2Jobs<br>
 
 MakeModelInitJob 干了啥？<br>
 JobBuilder 类对象通过 `job_builder.AddOps(Device 信息，即 parallel_conf , {xxx_op_conf 的 vector})` 将 op 信息添加到<br>
@@ -230,7 +242,7 @@ FOR_RANGE(int64_t, job_id, 0, jobs.size()) {
 ```
 
 
-# MakePushJob
+## MakePushJob
 PushJob:
 oneflow 遍历所有 User Job 中的 Input Op，针对每个 Input Op，分别构建一个对应的 Push Job。
 系统自动添加的 Push Job 用于接收输入数据，其 `ForeignInput Op` 内部维护一个buffer，该 buffer 等待 Python 端喂数据.
@@ -306,7 +318,7 @@ void MakePushJob(const std::string& job_name, const std::string& op_name,
 
 ```
 
-# MakePullJob
+## MakePullJob
 系统添加的 Pull Job 专门用于处理输出数据，Pull Job 中有一个 `ForeignOutput Op`，其内部同样维护一个 buffer，当往该 buffer 内填完数据以后，python 端对应的 of blob 对象中的 numpy 就拷贝了对应的数据。从而完整整个从输入到输出的数据流转过程。
 
 oneflow.cpp -> MakePullJob
@@ -349,100 +361,87 @@ void MakePullJob(const std::string& job_name, const std::string& op_name,
 }
 ```
 
+
 # CompileCurJobOnMaster
 
-## job_completer.cpp -> JobCompleter::Complete(Job* job)
-第一步，经过 JobCompleter 将 Job 不断重写。经过多个 Pass 以生成最终的 Job。<br>
-中间借助 OpGraph 抽象不断优化和推导新的 Job 对应的逻辑图。这些 Pass 包括一些优化，如增加控制边；计算临界区；以及使用 XRT 框架重新构建 Job。<br>
-
-job_completer.cpp -> JobCompleter::Complete(Job* job)<br>
+oneflow.cpp -> CompileJobsAndMergePlans 函数 -> CompileCurJobOnMaster 函数
 ```.cpp
-/**
-JobCompleter().Complete(job)：
-第一步，经过 JobCompleter 将 Job 不断重写。经过多个 Pass 以生成最终的 Job。
-中间借助 OpGraph 抽象不断推导新的 Job 对应的逻辑图。这些 Pass 包括一些优化，如增加控制边；计算临界区；以及使用 XRT 框架重新构建 Job。
-*/
-void JobCompleter::Complete(Job* job) const {
-  JobPassCtx job_pass_ctx(GlobalJobDesc());
-  // JobPass4Name("DumpBlobParallelConfPass") 根据 PassName 获取 JobPass，构造 JobPass 对象
-  JobPass4Name("DumpBlobParallelConfPass")(job, &job_pass_ctx); 
-  // NOTE(chengcheng): disable this pass for reduce boxing memory life cycle to memory cost.
-  if (!Global<ResourceDesc, ForSession>::Get()->resource().disable_group_boxing_by_dst_parallel()) {
-
-    // 借助 OpGraph 抽象，不断优化和推导新的 Job 对应的逻辑图
-    // GroupBoxingByDstParallel 是 OpGraph 图优化的过程，下节讲。
-    WithOpGraphAndMutJobBuilder(job, &GroupBoxingByDstParallel); // 中间借助 OpGraph 抽象不断推导新的 Job 对应的逻辑图
-  }
-  WithOpGraphAndMutJobBuilder(job, &SetCtrlInOpName4VariableOp);
-  // complete tick ops
-  WithOpGraphAndMutJobBuilder(job, &AutoPrependTick);
-  WithOpGraphAndMutJobBuilder(job, &AddTickForTimeShape);
-  WithOpGraphAndMutJobBuilder(job, &AutoSourceAndSinkTick);
-  WithOpGraphAndMutJobBuilder(job, &AddGlobalInputCriticalSections);
-  WithOpGraphAndMutJobBuilder(job, &AddGlobalOutputCriticalSections);
-  JobPass4Name("DumpBlobParallelConfPass")(job, &job_pass_ctx);
-  if (XrtCompilationEnabled(GlobalJobDesc())) {
-
-// 使用 XRT 框架重新构建 Job，XRT 框架会将 Job 中的 OpGraph 进行有选择的合并，并选取使用 XLA 来进行编译生成优化后的 Kernel。
-#ifdef OF_WITH_XRT
-    WithOpGraphAndMutJob(job, &RebuildXrtCompiledJob); 
-#else
-    LOG(WARNING) << "It will not use XLA or TensorRT since WITH_XLA or "
-                    "WITH_TENSORRT was not enabled when compiling the project.";
-#endif  // OF_WITH_XRT
-  }
-
-#ifdef WITH_CUDA
-  if (Global<ResourceDesc, ForSession>::Get()->nccl_use_compute_stream()) {
-    // NOTE(chengcheng): this pass need as last pass for insert correct op with nccl boxing.
-    JobPass4Name("InsertNcclLogicalOpPass")(job, &job_pass_ctx);
-    // NOTE(chengcheng): Becasue insert new logical nccl op, MUST dump time shape, sbp again.
-    JobPass4Name("DumpBlobParallelConfPass")(job, &job_pass_ctx); // 插入 logical nccl op 后，重新转储（dump）time shape, sbp。
-  }
-#endif  // WITH_CUDA
-  CheckOpGraph(OpGraph(*job));
-}
-
-}  // namespace oneflow
-```
-
-2021-7-28
-梳理关系
-oneflow.cpp
-
-```.cpp
-Maybe<void> CompileJobsAndMergePlans(const PbRpf<Job>& job_confs, Plan& plan){
-
-MakeModelIoJobs/MakeModelIoV2Jobs
-MakePushJob
-MakePullJob
-
+CompileJobsAndMergePlans(){
+...
 CompileCurJobOnMaster(jobs.at(i).get(), &sub_plans.at(i), true)
-
-
-MergeSubPlanWithoutGenNetTopo(&plan, std::move(sub_plans))
-
-InterJobMemSharingUtil::MergeMemReusedChunkBetweenUserJobs(function_jobs, &plan);
-InterJobMemSharingUtil::MergeMemSharedInterfaceMemBlockBetweenJobs(jobs, &plan);
-PlanUtil::SetForceInplaceMemBlock(&plan);
-FinishGlobalCriticalSectionDesc(plan, jobs.size());
-
-MakeMainJob(&main_job, &identity_tick_op_names, &lock_back_edges)
-
-CompileMainJob(&main_job, lock_back_edges, jobs.size(), &main_plan)
-
-LinkMainPlan(&plan, std::move(main_plan), identity_tick_op_names)
-
-PlanUtil::CleanUselessMemBlockAndCheckValid(&plan)
-
-DumpCtrlRegstInfoToPlan(&plan)
-
+...
 }
-
 ```
 
-Compile Jobs && Merge Plans
-![CompileJob](https://user-images.githubusercontent.com/31394900/127262657-e0506b2d-e02f-42c7-a3c3-84764079b322.png)
+CompileCurJobOnMaster 包含两个过程： Compiler().Compile(job, plan) -> GenCollectiveBoxingPlan(job, plan)
+
+## Compiler::Compile(Job* job, Plan* plan) 过程
+
+Step1. JobCompleter().Complete(job)
+
+Step2. new Global<OpGraph>
+
+Step3. build task_gph
+    
+Step4. put infomation from task_gph into plan
+
+Step5. post-process for plan and delete Global<OpGraph>
+
+
+### 1. JobCompleter().Complete(job)
+  
+job_completer.cpp -> JobCompleter::Complete(Job* job)<br>
+  
+经过 JobCompleter 将 Job 不断重写。经过多个 Pass 以生成最终的 Job。中间借助 OpGraph 抽象不断优化和推导新的 Job 对应的逻辑图。这些 Pass 包括一些优化，如增加控制边；计算临界区；以及使用 XRT 框架重新构建 Job。其中 WithOpGraphAndMutJobBuilder 函数借助 OpGraph 抽象，不断优化和推导新的 Job 对应的逻辑图。<br>
+
+job_completer.cpp -> WithOpGraphAndMutJobBuilder
+```.cpp
+void WithOpGraphAndMutJobBuilder(Job* job, const std::function<void(const OpGraph&, JobBuilder*)>& Handler) {
+  OpGraph op_graph(*job); // 利用当前 job 构造 OpGraph 对象
+  JobBuilder job_builder(job); // 利用当前 job 构造 JobBuilder 对象
+  Handler(op_graph, &job_builder); // Handler 是借助 OpGraph，优化当前 job 的操作过程
+}
+```
+
+    
+
+### 2. new Global<OpGraph>
+
+### 3. build task_gph
+
+
+### 4. put infomation from task_gph into plan
+
+    
+### 5. post-process for plan and delete Global<OpGraph>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -482,5 +481,39 @@ message Plan {
   required CollectiveBoxingPlan collective_boxing_plan= 5;
   required CtrlRegstDescInfo ctrl_regst_desc_info = 6;
   map<int64, OpAttributeRefTable> job_id2op_attribute_ref_table = 7;
+}
+```
+
+## oneflow.cpp::FilterOpName2ParallelBlobConf<br>
+
+FilterOpName2ParallelBlobConf 干了啥？<br>
+获取当前 job 中需要内存复用的 OpBlob 的信息，将当前 job 的 (op_conf，parallel_blob_conf）信息添加到 op_name2parallel_blob_conf 集合里。<br>
+
+```.cpp
+/**
+FilterOpName2ParallelBlobConf：获取当前 job 中需要内存复用的 OpBlob 的信息，将当前 job 的 (op_conf，parallel_blob_conf）信息添加到 op_name2parallel_blob_conf 集合里。
+判断当前 job 的 op_conf.op_type_case() 是否在匹配集合 match 对象 （OperatorConf::OpTypeCase 类型）里：
+如果有，获取当前 job 中需要内存复用的 OpBlob 的信息。再判断当前 job 的 op_conf 是否在 op_name2parallel_blob_conf 集合里：
+如果有，则校验两者的 parallel_blob_conf 是否相等；
+如果没有，则 op_name2parallel_blob_conf 添加当前 job 的信息。
+
+*/
+void FilterOpName2ParallelBlobConf(
+    const HashSet<OperatorConf::OpTypeCase>& match, const std::vector<std::shared_ptr<Job>>& jobs,
+    HashMap<std::string, ParallelBlobConf>* op_name2parallel_blob_conf) {
+  FOR_RANGE(int64_t, job_id, 0, jobs.size()) {
+    JobBuilder job_builder(jobs.at(job_id).get()); // 根据 job 对象，构造了 job_builder 对象
+    for (const OperatorConf& op_conf : jobs.at(job_id)->net().op()) {
+      if (match.find(op_conf.op_type_case()) == match.end()) { continue; } // 若当前 job 的 op_conf.op_type_case() 不在 OperatorConf::OpTypeCase 匹配集合 match 里，则跳过进入下一个 job 循环
+      ParallelBlobConf parallel_blob_conf; 
+      GetMemSharingOpBlobInfo(job_builder, op_conf.name(), &parallel_blob_conf); // 获取当前 job 中需要内存复用的 OpBlob 的信息
+      auto iter = op_name2parallel_blob_conf->find(op_conf.name());
+      if (iter == op_name2parallel_blob_conf->end()) { // 判断 op_name2parallel_blob_conf 是否存在当前 job 的 (op_conf，parallel_blob_conf）信息
+        CHECK(op_name2parallel_blob_conf->emplace(op_conf.name(), parallel_blob_conf).second); // 如果没有，则 op_name2parallel_blob_conf 添加当前 job 的信息
+      } else {
+        CHECK(parallel_blob_conf == iter->second); // 如果有，则校验两者的 parallel_blob_conf 是否相等
+      }
+    }
+  }
 }
 ```
