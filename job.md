@@ -406,6 +406,81 @@ void JobCompleter::Complete(Job* job) const {
 }  // namespace oneflow
 ```
 
+2021-7-28
+梳理关系
+oneflow.cpp
 
-# OpGraph
+```.cpp
+Maybe<void> CompileJobsAndMergePlans(const PbRpf<Job>& job_confs, Plan& plan){
 
+MakeModelIoJobs/MakeModelIoV2Jobs
+MakePushJob
+MakePullJob
+
+CompileCurJobOnMaster(jobs.at(i).get(), &sub_plans.at(i), true)
+
+
+MergeSubPlanWithoutGenNetTopo(&plan, std::move(sub_plans))
+
+InterJobMemSharingUtil::MergeMemReusedChunkBetweenUserJobs(function_jobs, &plan);
+InterJobMemSharingUtil::MergeMemSharedInterfaceMemBlockBetweenJobs(jobs, &plan);
+PlanUtil::SetForceInplaceMemBlock(&plan);
+FinishGlobalCriticalSectionDesc(plan, jobs.size());
+
+MakeMainJob(&main_job, &identity_tick_op_names, &lock_back_edges)
+
+CompileMainJob(&main_job, lock_back_edges, jobs.size(), &main_plan)
+
+LinkMainPlan(&plan, std::move(main_plan), identity_tick_op_names)
+
+PlanUtil::CleanUselessMemBlockAndCheckValid(&plan)
+
+DumpCtrlRegstInfoToPlan(&plan)
+
+}
+
+```
+
+Compile Jobs && Merge Plans
+![CompileJob](https://user-images.githubusercontent.com/31394900/127262657-e0506b2d-e02f-42c7-a3c3-84764079b322.png)
+
+
+
+
+## Job
+job.proto
+
+```.proto
+message Job {
+  required DLNetConf net = 1;
+  required Placement placement = 2;
+  required JobConfigProto job_conf = 3;
+  optional JobParallelViewConf job_parallel_view_conf = 4;
+  optional JobHelperConf helper = 5;
+}
+```
+自动生成 .pb.h 和 .pb.cc 实现
+```.pb.h
+// required .oneflow.DLNetConf net = 1;
+  bool has_net() const;
+  void clear_net();
+  const ::oneflow::DLNetConf& net() const;
+  ::oneflow::DLNetConf* release_net();
+  ::oneflow::DLNetConf* mutable_net();
+  void set_allocated_net(::oneflow::DLNetConf* net);
+  
+  ::oneflow::DLNetConf* net_;
+```
+
+## plan 
+```.proto
+message Plan {
+  repeated TaskProto task = 1;
+  required MemBlockAndChunkList block_chunk_list = 2;
+  required NetTopo net_topo = 3;
+  required JobConfs job_confs = 4;
+  required CollectiveBoxingPlan collective_boxing_plan= 5;
+  required CtrlRegstDescInfo ctrl_regst_desc_info = 6;
+  map<int64, OpAttributeRefTable> job_id2op_attribute_ref_table = 7;
+}
+```
