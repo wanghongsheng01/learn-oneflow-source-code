@@ -290,14 +290,15 @@ void MakePushJob(const std::string& job_name, const std::string& op_name,
   auto* op_name2job_name =
       Global<InterUserJobInfo>::Get()->mutable_input_or_var_op_name2push_job_name(); // 获取 User Job 中 op_name2job_name 
   CHECK(op_name2job_name->find(op_name) == op_name2job_name->end());
-  (*op_name2job_name)[op_name] = job_name; // job_name 赋值给 op_name2job_name
+  (*op_name2job_name)[op_name] = job_name; // 为 job_name 匹配 Input Op
   DataType data_type;
   JobBuilder job_builder(job); // 创建 JobBuilder 对象，将输入 job 的信息添加到 JobBuilder 的成员变量中。 
 
   // 数据流：Data(Python 端) -> buffer(系统级 ForeignInput Op) 
   OperatorConf foreign_input_op_conf; // ForeignInput Op 内部维护一个 buffer，该 buffer 等待 Python 端喂数据
   {
-    // 1. 初始化 blob_conf(边信息): 设置 foreign_input_op_conf （点信息）的 name、out、buffer_name，并利用 op_conf（边）初始化 blob_conf（点）
+    // 1. 初始化 blob_conf(边信息): 设置 foreign_input_op_conf （点信息）
+    //    的 name、out、buffer_name，并利用 op_conf（节点）初始化 blob_conf（边）
     // 2. 配置 parallel_conf 的 device 信息
     // 3. 最后 job_builder.AddOps 添加 foreign_input_op 
     foreign_input_op_conf.set_name(std::string("System-Push-ForeignInput_") + NewUniqueId());
@@ -310,7 +311,8 @@ void MakePushJob(const std::string& job_name, const std::string& op_name,
     ParallelConf parallel_conf;
     parallel_conf.set_device_tag("cpu");
     parallel_conf.add_device_name("0:0");
-    job_builder.AddOps(parallel_conf, {foreign_input_op_conf}); // job_builder 添加 foreign_input_op 的信息 （parallel_conf，foreign_input_op_conf）
+    // job_builder 添加 foreign_input_op 的信息 （parallel_conf，foreign_input_op_conf）
+    job_builder.AddOps(parallel_conf, {foreign_input_op_conf}); 
   }
 
   // 数据流：buffer(系统级 ForeignInput Op) -> GPU(系统级 Output Op)
