@@ -5,28 +5,34 @@ oneflow.cpp
 ```.cpp
 Maybe<void> CompileJobsAndMergePlans(const PbRpf<Job>& job_confs, Plan& plan){
 
+// 1. 创建系统级 job 过程
 MakeModelIoJobs/MakeModelIoV2Jobs
 MakePushJob
 MakePullJob
 
+// 2. 编译 job，生成 subplans 过程
 CompileCurJobOnMaster(jobs.at(i).get(), &sub_plans.at(i), true)
 
-
+// 3. merge subplans 过程
 MergeSubPlanWithoutGenNetTopo(&plan, std::move(sub_plans))
 
+// 4. 处理 job 间内存复用的过程
 InterJobMemSharingUtil::MergeMemReusedChunkBetweenUserJobs(function_jobs, &plan);
 InterJobMemSharingUtil::MergeMemSharedInterfaceMemBlockBetweenJobs(jobs, &plan);
 PlanUtil::SetForceInplaceMemBlock(&plan);
 FinishGlobalCriticalSectionDesc(plan, jobs.size());
 
+// 5. 创建、编译、link main job 过程
 MakeMainJob(&main_job, &identity_tick_op_names, &lock_back_edges)
 
 CompileMainJob(&main_job, lock_back_edges, jobs.size(), &main_plan)
 
 LinkMainPlan(&plan, std::move(main_plan), identity_tick_op_names)
 
+// 6. 回收内存过程
 PlanUtil::CleanUselessMemBlockAndCheckValid(&plan)
 
+// 7. 将编译 job 生成的 plan 转存到 regist 里
 DumpCtrlRegstInfoToPlan(&plan)
 
 }
