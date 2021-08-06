@@ -2,6 +2,11 @@ register
 
 术语：<br>
 1. CUDA页锁定内存（Pinned Memory）<br>
+2. 使用须知：
+   当需要提升 CPU 与 Dvice 之间拷贝内存的效率时，需要在 host 端申请锁定内存，一般情况下默认申请的是可分页内存。
+   页锁定内存：页锁定内存是由 CUDA 函数 cudaHostAlloc() 在主机内存上分配的，该内存独占物理地址，主机的操作系统将不会对这块内存进行分页和交换操作。
+   
+
 对CUDA架构而言，主机端的内存被分为两种，一种是可分页内存（pageable memroy）和页锁定内存（page-lock或 pinned）。可分页内存是由操作系统API malloc()在主机上分配的，页锁定内存是由CUDA函数cudaHostAlloc()在主机内存上分配的，页锁定内存的重要属性是主机的操作系统将不会对这块内存进行分页和交换操作，确保该内存始终驻留在物理内存中。<br>
 GPU知道页锁定内存的物理地址，可以通过“直接内存访问（Direct Memory Access，DMA）”技术直接在主机和GPU之间复制数据，速率更快。由于每个页锁定内存都需要分配物理内存，并且这些内存不能交换到磁盘上，所以页锁定内存比使用标准malloc()分配的可分页内存更消耗内存空间。<br>
 
@@ -198,7 +203,8 @@ int main()
 		void* ptr = nullptr;
 		// 如果是 host，则 cudaMallocHost 分配 chunk 内存空间
 		if (mem_case.has_host_mem()) 
-		{
+		{       
+		        //  cudaMallocHost 分配页锁定内存
 			if (mem_case.host_mem().has_cuda_pinned_mem()) {
 	#ifdef WITH_CUDA
 				if (Global<ResourceDesc, ForSession>::Get()->enable_numa_aware_cuda_malloc_host()) {
@@ -208,7 +214,8 @@ int main()
 				}
 	#else
 				UNIMPLEMENTED();
-	#endif
+	#endif          
+	                // malloc 分配可分页内存
 			} else {
 				ptr = malloc(size);
 				CHECK_NOTNULL(ptr);
