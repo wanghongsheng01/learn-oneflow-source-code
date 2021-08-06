@@ -60,7 +60,7 @@ MakePullJob
 2. push/pull job： 则是在用户的 user job 编译为可执行 plan 时，系统自动添加的用于处理输入输出的系统级 job；
 3. model io job：则是用于初始化/保存/加载模型的系统级 job。
 
-代码功能——编译期数据流转
+代码功能——编译期数据流转<br>
 oneflow 默认将 C++ 端视为远程端，python 端视为本地。从 Python -> C++ 的过程视作 push，从 C++ -> Python 视作 pull。
 
 从数据层面看一下 User Job 的运行过程：首先，User Job 可能有多个输入、多个输出，oneflow 会遍历所有 User Job 中的 Input Op 和 Return Op，针对每个 Input Op，分别构建一个对应的 Push Job；针对每个 Return Op，分别构建一个对应的 Pull Job。
@@ -87,6 +87,15 @@ JobBuilder::job_ 、 JobBuilder::op_name2op_conf_ 、  PlacementGroup 里。<br>
  `job_builder.AddOps(pair.first, {model_init_op_conf}); // job_builder 添加 model_init_op 的信息（parallel_conf，model_init_op_conf）`<br>
 
 model_io_v2_job.cpp<br> 
+主要过程：
+`
+ job_builder.AddOps(parallel_blob_conf.parallel_conf(), {new_var_op_conf});  // job_builder 添加 var_op 的信息（parallel_conf，var_op_conf）
+ job_builder.AddOps(parallel_blob_conf.parallel_conf(), {new_var_op_conf});  // job_builder 添加 var_op 的信息（parallel_conf，var_op_conf）
+ job_builder.AddOps(pair.first, {model_init_op_conf}); // job_builder 添加 model_init_op 的信息（parallel_conf，model_init_op_conf）
+ 
+`
+
+
 ```.cpp
 // MakeModelInitJob("System-ModelInit", &model_init_job, var_op_name2op_conf, var_op_name2parallel_blob_conf);
 void MakeModelInitJob(
@@ -154,7 +163,7 @@ for (auto& pair : parallel_conf2variable_op_conf) { // parallel_conf2variable_op
 
 
 job_builder.AddOps(parallel_conf 信息, {xxx_op_conf 的 vector}) 干了啥？<br>
-将新添加 op 的 op_conf、op_conf、parallel_conf 信息更新（赋值）到 JobBuilder 类对象的成员变量中。<br>
+将新添加 op 的 op_conf、op_conf、parallel_conf 信息 bind（赋值）到 JobBuilder 类对象的成员变量中。<br>
 
 1. JobBuilder::job_: 用新添加 Op 的 op_conf 初始化 JobBuilder::job_ 的 OperatorConf<br>
 2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()<br>
@@ -166,7 +175,7 @@ job_builder.cpp -> JobBuilder::AddOps<br>
 // 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
 void JobBuilder::AddOps(const ParallelConf& parallel_conf,
                       const std::vector<OperatorConf>& op_confs) {
-// 做 3 件事情：
+// 做 3 件事情：将 op 的信息 bind 到 job 的 conf 中。
 // 1. JobBuilder::job_: 用新添加 Op 的 op_conf 初始化 JobBuilder::job_ 的 OperatorConf
 // 2. JobBuilder::op_name2op_conf_: JobBuilder::op_name2op_conf_ 添加新加入 Op 的（op_conf.name(), mut_op_conf)，同时 op_names 添加 op_conf.name()
 // 3. PlacementGroup: 将 (op_names, parallel_conf) 添加到 parallel_conf2placement_group_ 和 op_name2parallel_conf_ 里
