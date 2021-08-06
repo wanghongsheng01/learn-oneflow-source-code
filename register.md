@@ -247,16 +247,20 @@ void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto,
   const int64_t regst_desc_id = regst_desc_proto.regst_desc_id();
   const RegstDescTypeProto& regst_desc_type = regst_desc_proto.regst_desc_type();
   const RtRegstDesc* rt_regst_desc = regst_desc_id2rt_regst_desc_.at(regst_desc_id).get();
-  char* main_mem_ptr = nullptr;
-  char* separated_header_mem_ptr = nullptr;
-  int64_t mem_block_id = regst_desc_proto.mem_block_id();
+  
+  // 分配内存，从 chunk 上分配 block 内存，从 block 上分配内存
+  char* main_mem_ptr = nullptr; // 指向 blob 中数据的内存地址（regist 里主要存储的是 blob）
+  char* separated_header_mem_ptr = nullptr; // 指向存储动态形状空间的内存地址，一般为动态形状预留最大范围的内存地址
+  int64_t mem_block_id = regst_desc_proto.mem_block_id(); // 从 chunk 上分配出 block
   int64_t header_block_id = regst_desc_proto.separated_header_mem_block_id();
   if (mem_block_id != -1 && mem_block_id2ptr_.find(mem_block_id) != mem_block_id2ptr_.end()) {
-    main_mem_ptr = mem_block_id2ptr_.at(mem_block_id) + regst_desc_proto.mem_block_offset();
+    main_mem_ptr = mem_block_id2ptr_.at(mem_block_id) + regst_desc_proto.mem_block_offset(); // 从 block 上分配内存，分配指向 blob 的内存地址（regist 里主要存储的是 blob）
   }
   if (header_block_id != -1 && mem_block_id2ptr_.find(header_block_id) != mem_block_id2ptr_.end()) {
-    separated_header_mem_ptr = mem_block_id2ptr_.at(header_block_id);
+    separated_header_mem_ptr = mem_block_id2ptr_.at(header_block_id); // 指向存储动态形状空间的内存地址，一般为动态形状预留最大范围的内存地址
   }
+  
+  // 添加 regist 里存放的 blob 的信息（lbi，blob_desc）
   std::vector<LbiBlobDescPair> lbi_pairs;
   if (regst_desc_type.has_data_regst_desc()) {
     for (const LbiBlobDescPair& pair : regst_desc_type.data_regst_desc().lbi2blob_desc()) {
@@ -268,7 +272,7 @@ void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto,
   for (int64_t i = 0; i < rt_regst_desc->register_num(); ++i) {
     Regst* regst = new Regst;
     regst->set_regst_desc(rt_regst_desc);
-    if (regst_desc_type.has_data_regst_desc()) {
+    if (regst_desc_type.has_data_regst_desc()) { 
       NewBlobsInOneRegst(lbi_pairs, regst, rt_regst_desc, main_mem_ptr, separated_header_mem_ptr);
       if (rt_regst_desc->mem_case().has_host_mem()
           && rt_regst_desc->mem_case().host_mem().used_by_network()) {
