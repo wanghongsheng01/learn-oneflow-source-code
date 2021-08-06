@@ -61,6 +61,7 @@ MakePullJob
 3. model io job：则是用于初始化/保存/加载模型的系统级 job。
 
 代码功能——编译期数据流转
+oneflow 默认将 C++ 端视为远程端，python 端视为本地。从 Python -> C++ 的过程视作 push，从 C++ -> Python 视作 pull。
 
 从数据层面看一下 User Job 的运行过程：首先，User Job 可能有多个输入、多个输出，oneflow 会遍历所有 User Job 中的 Input Op 和 Return Op，针对每个 Input Op，分别构建一个对应的 Push Job；针对每个 Return Op，分别构建一个对应的 Pull Job。
 
