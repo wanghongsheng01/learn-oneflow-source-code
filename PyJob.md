@@ -1,4 +1,6 @@
 # 一个 user_job 的执行过程
+回顾一下 启动一个 job 时，数据在 Python 端的流转过程
+主要是将用户定义的 function 通过 oneflow 的接口 @oneflow_function_config 添加为 FunctionConfig 类的属性。
 
 ## 用户定义的一个 user_job
 ==> pad_Job
@@ -209,8 +211,7 @@ def TryInit(self):
 
 
 
-赵露阳打印 Plan 图
-https://github.com/Oneflow-Inc/OneTeam/issues/224
-![image](https://user-images.githubusercontent.com/31394900/126096332-3077be4a-cf3e-4ddb-b1de-6a7411e3ab21.png)
 
+
+[打印 Plan 图方法](https://github.com/Oneflow-Inc/OneTeam/issues/224)
 
