@@ -249,15 +249,25 @@ void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto,
   const RtRegstDesc* rt_regst_desc = regst_desc_id2rt_regst_desc_.at(regst_desc_id).get();
   
   // 分配内存，从 chunk 上分配 block 内存，从 block 上分配内存
-  char* main_mem_ptr = nullptr; // 指向 blob 中数据的内存地址（regist 里主要存储的是 blob）
-  char* separated_header_mem_ptr = nullptr; // 指向存储动态形状空间的内存地址，一般为动态形状预留最大范围的内存地址
-  int64_t mem_block_id = regst_desc_proto.mem_block_id(); // 从 chunk 上分配出 block
+  
+  // 指向 blob 中数据的内存地址（regist 里主要存储的是 blob）
+  char* main_mem_ptr = nullptr; 
+  
+  // 指向存储动态形状空间的内存地址，一般为动态形状预留最大范围的内存地址
+  char* separated_header_mem_ptr = nullptr; 
+  
+  // 从 chunk 上分配出 block
+  int64_t mem_block_id = regst_desc_proto.mem_block_id(); 
   int64_t header_block_id = regst_desc_proto.separated_header_mem_block_id();
   if (mem_block_id != -1 && mem_block_id2ptr_.find(mem_block_id) != mem_block_id2ptr_.end()) {
-    main_mem_ptr = mem_block_id2ptr_.at(mem_block_id) + regst_desc_proto.mem_block_offset(); // 从 block 上分配内存，分配指向 blob 的内存地址（regist 里主要存储的是 blob）
+  
+    // 从 block 上分配内存，分配指向 blob 的内存地址（regist 里主要存储的是 blob）
+    main_mem_ptr = mem_block_id2ptr_.at(mem_block_id) + regst_desc_proto.mem_block_offset(); 
   }
   if (header_block_id != -1 && mem_block_id2ptr_.find(header_block_id) != mem_block_id2ptr_.end()) {
-    separated_header_mem_ptr = mem_block_id2ptr_.at(header_block_id); // 指向存储动态形状空间的内存地址，一般为动态形状预留最大范围的内存地址
+  
+    // 指向存储动态形状空间的内存地址，一般为动态形状预留最大范围的内存地址
+    separated_header_mem_ptr = mem_block_id2ptr_.at(header_block_id); 
   }
   
   // 添加 regist 里存放的 blob 的信息（lbi，blob_desc）
@@ -273,6 +283,11 @@ void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto,
     Regst* regst = new Regst;
     regst->set_regst_desc(rt_regst_desc);
     if (regst_desc_type.has_data_regst_desc()) { 
+      // new 一个 regist 里存放的 blob 出来
+      // 指定 blob 的 blob_id 和 blob_desc
+      // blob 的创建方式，采用动静结合：静态地为新创建的 blob 分配 main_mem_ptr 内存地址，即 main_mem_ptr
+      // 动态地为 blob 分配动态形状空间的内存地址，即 separated_header_mem_ptr
+      // 指定 regist 的信息（regist, rt_regst_desc）
       NewBlobsInOneRegst(lbi_pairs, regst, rt_regst_desc, main_mem_ptr, separated_header_mem_ptr);
       if (rt_regst_desc->mem_case().has_host_mem()
           && rt_regst_desc->mem_case().host_mem().used_by_network()) {
@@ -289,10 +304,12 @@ void RegstMgr::NewRegsts(const RegstDescProto& regst_desc_proto,
     } else {
       UNIMPLEMENTED();
     }
-    OneRegstDone(regst); // new 出来的 regist，最终回调到 RegstMgr::NewRegsts 的调用者里 actor.cpp 的 lambda 函数里
+    // new 出来的 regist，最终回调到 RegstMgr::NewRegsts 的调用者里 actor.cpp 的 lambda 函数里
+    OneRegstDone(regst); 
     /*
     [this](Regst* regst) {
-      produced_regsts_[regst->regst_desc_id()].emplace_back(regst); // Actor::produced_regsts_ 成员变量，Actor 的写的 regist 成员变量
+      // Actor::produced_regsts_ 成员变量，Actor 写的 regist 成员变量
+      produced_regsts_[regst->regst_desc_id()].emplace_back(regst); 
     }
     */
   }
