@@ -6,12 +6,15 @@
 ## 生产者 Actor 与 消费者 Actor 之间消息传递，msg 的流动轨迹
 ![image](https://user-images.githubusercontent.com/31394900/125795762-ae38987f-8574-4687-987c-dacb22ea08be.png)
 
-当 Actor a 给 Actor b 发消息时，会判断 Actor b 是否在当前线程内，<br>
-如果是，则将 Actor a 发送的消息直接压入当前 Thread 的 Local Msg Queue 中；<br
+当 Actor a 给 Actor b 发消息时，会判断 Actor b 是否在当前线程内<br>
+如果是，则将 Actor a 发送的消息直接压入当前 Thread 的 Local Msg Queue 中；<br>
 否则 Actor a 将消息发送给当前机器的 Actor Msg Bus （每个 Machine 都有自己的一个 Actor Msg Bus），Actor Msg Bus 判断接收者的 Actor 的 Thread 是否在本机上，<br>
 如果是，则 Actor Msg Bus 会在本机上找到该 Thread，将消息传给该 Thread 的 Msg channel。<br>
 如果不是，Actor a 将 msg 发送给本机 Actor Msg Bus，Actor Msg Bus 再把 msg 发送给本机传输数据的 Common Net，由 Actor b 机器的 Common Net 接收 msg，
 传递给接收机的 Actor Msg Bus，Actor Msg Bus 再找到接收 Actor 的 Thread，将消息压入该 Thread 的 Msg channel 消息队列中。<br>
+
+![image](https://user-images.githubusercontent.com/31394900/141301209-c193d85f-543b-4778-a6a1-433dee166849.png)
+
 
 ## 术语：
 *  Actor Msg Bus ：每个 Machine 都有自己的一个 Actor Msg Bus，当同一机器跨 Thread 或不同机器上传递 msg 时，需要 Actor Msg Bus 传递数据
